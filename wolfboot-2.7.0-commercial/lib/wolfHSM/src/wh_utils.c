@@ -1,0 +1,151 @@
+/*
+ * Copyright (C) 2014-2025 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+/*
+ * src/wh_utils.c
+ *
+ */
+
+/* Pick up compile-time configuration */
+#include "wolfhsm/wh_settings.h"
+
+#include <stdint.h>
+#include <stddef.h> /* For size_t */
+#include <string.h> /* For memset/cpy */
+
+#if defined(WOLFHSM_CFG_HEXDUMP)
+#include <stdio.h>
+#endif
+
+#include "wolfhsm/wh_utils.h"
+
+/** Byteswap functions */
+uint16_t wh_Utils_Swap16(uint16_t val)
+{
+    return (val >> 8) | (val << 8);
+}
+
+uint32_t wh_Utils_Swap32(uint32_t val)
+{
+    return  ((val & 0xFF000000ul) >> 24) |
+            ((val & 0x00FF0000ul) >> 8) |
+            ((val & 0x0000FF00ul) << 8) |
+            ((val & 0x000000FFul) << 24);
+}
+
+uint64_t wh_Utils_Swap64(uint64_t val)
+{
+    return  ((val & 0xFF00000000000000ull) >> 56) |
+            ((val & 0xFF000000000000ull) >> 40) |
+            ((val & 0xFF0000000000ull) >> 24) |
+            ((val & 0xFF00000000ull) >> 8)|
+            ((val & 0xFF000000ull) << 8) |
+            ((val & 0xFF0000ull) << 24 ) |
+            ((val & 0xFF00ull) << 40) |
+            ((val & 0xFFull) << 56);
+}
+
+static int isLittleEndian(void) {
+    unsigned int x = 1; /* 0x00000001 */
+    char *c = (char*)&x;
+    return (int)*c;
+}
+
+/* Converts a 32-bit value from host to network byte order */
+uint32_t wh_Utils_htonl(uint32_t hostlong) {
+    if (isLittleEndian()) {
+        return wh_Utils_Swap32(hostlong);
+    }
+    return hostlong; /* No conversion needed if not little endian */
+}
+
+uint32_t wh_Utils_ntohl(uint32_t networklong) {
+    /* same operation */
+    return wh_Utils_htonl(networklong);
+}
+
+
+
+int wh_Utils_memeqzero(uint8_t* buffer, uint32_t size)
+{
+    while (size > 1) {
+        size--;
+        if (buffer[size] != 0)
+            return 0;
+    }
+    return 1;
+}
+
+/** Cache helper functions */
+const void* wh_Utils_CacheInvalidate(const void* p, size_t n)
+{
+    int len = (int)n;
+    const uint8_t* ptr = (const uint8_t*)p;
+    do {
+        XCACHEINVLD(ptr);
+        ptr += XCACHELINE;
+        len -= XCACHELINE;
+    } while (len > 0);
+    return p;
+}
+
+void* wh_Utils_CacheFlush(void* p, size_t n)
+{
+    int len = (int)n;
+    uint8_t* ptr = (uint8_t*)p;
+    do {
+        XCACHEFLUSH(ptr);
+        ptr += XCACHELINE;
+        len -= XCACHELINE;
+    } while (len > 0);
+    return p;
+}
+
+void* wh_Utils_memset_flush(void* p, int c, size_t n)
+{
+    memset(p, c, n);
+    XMEMFENCE();
+    return XCACHEFLUSHBLK(p, n);
+}
+
+void* wh_Utils_memcpy_invalidate(void* dst, const void* src, size_t n)
+{
+    return memcpy(dst, XCACHEINVLDBLK(src, n), n);
+}
+
+void* wh_Utils_memcpy_flush(void* dst, const void* src , size_t n)
+{
+    memcpy(dst,src,n);
+    XMEMFENCE();
+    return XCACHEFLUSHBLK(dst, n);
+}
+
+
+#if defined(WOLFHSM_CFG_HEXDUMP)
+void wh_Utils_Hexdump(const char* initial, const uint8_t* ptr, size_t size)
+{
+#define HEXDUMP_BYTES_PER_LINE 16
+    int count = 0;
+    if(initial != NULL)
+        WOLFHSM_CFG_PRINTF("%s",initial);
+    while(size > 0) {
+        WOLFHSM_CFG_PRINTF("%02X ", *ptr);
+        ptr++;
+        size --;
+        count++;
+        if (count % HEXDUMP_BYTES_PER_LINE == 0) {
+            WOLFHSM_CFG_PRINTF("\n");
+        }
+    }
+    if((count % HEXDUMP_BYTES_PER_LINE) != 0) {
+        WOLFHSM_CFG_PRINTF("\n");
+    }
+}
+#endif
+

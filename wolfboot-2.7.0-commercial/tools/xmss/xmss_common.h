@@ -1,0 +1,134 @@
+/* xmss_common.h
+ *
+ * Common callback functions used by XMSS to write/read the private
+ * key file.
+ *
+ *
+ * Copyright (C) 2014-2025 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#ifndef XMSS_COMMON_H
+#define XMSS_COMMON_H
+static enum wc_XmssRc xmss_write_key(const byte * priv, word32 privSz, void * context)
+{
+    FILE *       file = NULL;
+    const char * filename = NULL;
+    int          n_cmp = 0;
+    size_t       n_read = 0;
+    size_t       n_write = 0;
+    byte *       buff = NULL;
+    int          err = 0;
+
+    if (priv == NULL || context == NULL || privSz == 0) {
+        fprintf(stderr, "error: invalid write args\n");
+        return WC_XMSS_RC_BAD_ARG;
+    }
+
+    filename = context;
+
+    /* Open file for read and write. */
+    file = fopen(filename, "rb+");
+    if (!file) {
+        /* Create the file if it didn't exist. */
+        file = fopen(filename, "wb+");
+        if (!file) {
+            fprintf(stderr, "error: fopen(%s, \"w+\") failed.\n", filename);
+            return WC_XMSS_RC_WRITE_FAIL;
+        }
+    }
+
+    n_write = fwrite(priv, 1, privSz, file);
+
+    if (n_write != privSz) {
+        fprintf(stderr, "error: wrote %d, expected %d: %d\n",
+            (int)n_write, privSz, ferror(file));
+        return WC_XMSS_RC_WRITE_FAIL;
+    }
+
+    err = fclose(file);
+    if (err) {
+        fprintf(stderr, "error: fclose returned %d\n", err);
+        return WC_XMSS_RC_WRITE_FAIL;
+    }
+
+    /* Verify private key data has actually been written to persistent
+     * storage correctly. */
+    file = fopen(filename, "rb+");
+    if (!file) {
+        fprintf(stderr, "error: fopen(%s, \"r+\") failed.\n", filename);
+        return WC_XMSS_RC_WRITE_FAIL;
+    }
+
+    buff = malloc(privSz);
+    if (buff == NULL) {
+        fprintf(stderr, "error: malloc(%d) failed\n", privSz);
+        return WC_XMSS_RC_WRITE_FAIL;
+    }
+
+    XMEMSET(buff, 0, n_write);
+
+    n_read = fread(buff, 1, n_write, file);
+
+    if (n_read != n_write) {
+        fprintf(stderr, "error: read %d, expected %d: %d\n",
+            (int)n_read, (int)n_write, ferror(file));
+        free(buff);
+        return WC_XMSS_RC_WRITE_FAIL;
+    }
+
+    n_cmp = XMEMCMP(buff, priv, n_write);
+    free(buff);
+    buff = NULL;
+
+    if (n_cmp != 0) {
+        fprintf(stderr, "error: write data was corrupted: %d\n", n_cmp);
+        return WC_XMSS_RC_WRITE_FAIL;
+    }
+
+    err = fclose(file);
+    if (err) {
+        fprintf(stderr, "error: fclose returned %d\n", err);
+        return WC_XMSS_RC_WRITE_FAIL;
+    }
+
+    return WC_XMSS_RC_SAVED_TO_NV_MEMORY;
+}
+
+static enum wc_XmssRc xmss_read_key(byte * priv, word32 privSz, void * context)
+{
+    FILE *       file = NULL;
+    const char * filename = NULL;
+    size_t       n_read = 0;
+
+    if (priv == NULL || context == NULL || privSz == 0) {
+        fprintf(stderr, "error: invalid read args\n");
+        return WC_XMSS_RC_BAD_ARG;
+    }
+
+    filename = context;
+
+    file = fopen(filename, "rb");
+    if (!file) {
+        fprintf(stderr, "error: fopen(%s, \"rb\") failed\n", filename);
+        return WC_XMSS_RC_READ_FAIL;
+    }
+
+    n_read = fread(priv, 1, privSz, file);
+
+    if (n_read != privSz) {
+        fprintf(stderr, "error: read %d, expected %d: %d\n",
+            (int)n_read, privSz, ferror(file));
+        return WC_XMSS_RC_READ_FAIL;
+    }
+
+    fclose(file);
+
+    return WC_XMSS_RC_READ_TO_MEMORY;
+}
+#endif /* XMSS_COMMON_H */

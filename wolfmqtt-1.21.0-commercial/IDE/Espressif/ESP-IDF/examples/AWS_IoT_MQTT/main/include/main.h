@@ -1,0 +1,20 @@
+/* template main.h
+ *
+ * Copyright (C) 2006-2025 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfMQTT.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#ifndef _MAIN_H_
+#define _MAIN_H_
+
+#include <nvs_flash.h>
+#include <esp_log.h>
+#include <esp_event.h>
+#include <awsiot.h>
+
+#endif

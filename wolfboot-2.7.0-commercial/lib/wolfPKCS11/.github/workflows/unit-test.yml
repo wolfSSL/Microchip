@@ -1,0 +1,104 @@
+name: wolfPKCS11 Build Tests
+
+on:
+  push:
+    branches: [ 'master', 'main', 'release/**' ]
+  pull_request:
+    branches: [ '*' ]
+
+jobs:
+
+  defaults_all:
+    uses: ./.github/workflows/build-workflow.yml
+
+  single_theaded:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --enable-singlethreaded
+
+  tpm:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --enable-singlethreaded --enable-wolftpm --disable-dh C_EXTRA_FLAGS="-DWOLFPKCS11_TPM_STORE"
+      check: ./tests/pkcs11str && ./tests/pkcs11test && ./tests/rsa_session_persistence_test
+
+  no_rsa:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-rsa
+  no_rsaoaep:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-rsaoaep
+  no_rsapss:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-rsapss
+  no_ecc:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-ecc
+  no_dh:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-dh
+  no_keygen:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-keygen
+  no_keystore:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: CFLAGS="-DWOLFPKCS11_NO_STORE"
+  no_aesgcm:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-aesgcm
+  no_sha512:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-sha512
+  no_sha384:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-sha384
+  no_sha224:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-sha224
+  no_sha3:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-sha3
+  no_sha1:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-sha1
+  no_md5:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-md5
+  no_hmac:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --disable-hmac --disable-hkdf
+  with_nss:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --enable-nss
+  pbkdf2:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --enable-pbkdf2 --with-pbkdf2-iterations=1000
+
+  debug:
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      config: --enable-debug
+
+  wolfssl_v5_6_6:
+    uses: ./.github/workflows/wolfssl-v5.6.6-build-workflow.yml
+
+  #TODO: --disable-aes            Enable AES (default: enabled)
+  #TODO: --disable-aescbc         Enable AES-CBC (default: enabled)
+  #TODO: --disable-sha256         Enable SHA-256 (default: enabled)

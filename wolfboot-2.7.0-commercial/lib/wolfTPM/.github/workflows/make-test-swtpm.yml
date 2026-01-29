@@ -1,0 +1,299 @@
+name: WolfTPM Build Tests
+
+on:
+  push:
+    branches: [ 'master', 'main', 'release/**' ]
+  pull_request:
+    branches: [ '*' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Defaults (applied when not specified in matrix entries):
+        # wolfssl_config: --enable-wolftpm --enable-pkcallbacks
+        # wolfssl_cflags: ""
+        # wolfssl_ref: master
+        # wolftpm_config: --enable-swtpm
+        # wolftpm_cflags: ""
+        # test_command: "true"
+        # needs_swtpm: true
+        # needs_mono: false
+        # needs_dist: false
+        # needs_install: false
+        # csharp_test: false
+        # wolftpm_cc: ""
+        include:
+          # Default build with simulator
+          - name: default
+            test_command: "make check && WOLFSSL_PATH=./wolfssl ./examples/run_examples.sh"
+            needs_dist: true
+            needs_install: true
+
+          # CSharp wrapper tests
+          - name: csharp
+            test_command: "true"
+            needs_mono: true
+            needs_install: true
+            csharp_test: true
+
+          # No wolfCrypt
+          - name: no-wolfcrypt
+            wolftpm_config: --enable-swtpm --disable-wolfcrypt
+            test_command: "make check && WOLFSSL_PATH=./wolfssl WOLFCRYPT_ENABLE=0 ./examples/run_examples.sh"
+
+          # No wrapper
+          - name: no-wrapper
+            wolftpm_config: --enable-swtpm --disable-wrapper
+            test_command: "./examples/native/native_test"
+
+          # Small stack
+          - name: smallstack
+            wolftpm_config: --enable-swtpm --enable-smallstack
+            test_command: "make check && WOLFSSL_PATH=./wolfssl ./examples/run_examples.sh"
+
+          # Infineon SLB9670
+          - name: slb9670
+            wolftpm_config: --enable-infineon=slb9670
+          # Infineon SLB9672
+          - name: slb9672
+            wolftpm_config: --enable-infineon=slb9672
+          # Infineon SLB9673
+          - name: slb9673
+            wolftpm_config: --enable-infineon=slb9673 --enable-i2c
+          # STMicro ST33KTPM2
+          - name: st33ktpm2
+            wolftpm_config: --enable-st33
+          # Microchip
+          - name: microchip
+            wolftpm_config: --enable-microchip
+          # Nuvoton
+          - name: nuvoton
+            wolftpm_config: --enable-nuvoton
+
+          # TIS lock
+          - name: tislock
+            wolftpm_config: --enable-tislock
+            needs_swtpm: false
+
+          # Debug
+          - name: debug
+            wolftpm_config: --enable-debug
+            needs_swtpm: false
+
+          # Debug verbose
+          - name: debug-verbose
+            wolftpm_config: --enable-debug=verbose
+            needs_swtpm: false
+
+          # Debug IO
+          - name: debug-io
+            wolftpm_config: --enable-debug=io
+            wolftpm_cflags: "-DWOLFTPM_DEBUG_TIMEOUT"
+            needs_swtpm: false
+
+          # AdvIO
+          - name: advio
+            wolftpm_config: --enable-advio
+            needs_swtpm: false
+
+          # Clang ASAN
+          - name: clang-asan
+            wolftpm_cflags: "-fsanitize=address -fno-omit-frame-pointer -g"
+            wolftpm_cc: clang
+            test_command: "make check && ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 WOLFSSL_PATH=./wolfssl ./examples/run_examples.sh"
+
+          # Pedantic
+          - name: pedantic
+            wolftpm_config: ""
+            wolftpm_cflags: "-Wpedantic"
+            needs_swtpm: false
+
+          # Not provisioning
+          - name: no-provisioning
+            wolftpm_config: --disable-provisioning
+            needs_swtpm: false
+
+          # Symmetric encryption
+          - name: symmetric
+            wolftpm_cflags: "-DWOLFTPM_USE_SYMMETRIC"
+            test_command: "make check && WOLFSSL_PATH=./wolfssl ./examples/run_examples.sh"
+
+          # Software ECDHE
+          - name: swecdhe
+            wolftpm_cflags: "-DWOLFTPM2_USE_SW_ECDHE"
+            test_command: "make check && WOLFSSL_PATH=./wolfssl ./examples/run_examples.sh"
+
+          # No ECC
+          - name: no-ecc
+            wolfssl_config: --enable-wolftpm --disable-ecc
+            test_command: "make check && WOLFSSL_PATH=./wolfssl WOLFCRYPT_ECC=0 ./examples/run_examples.sh"
+            needs_install: true
+
+          # No RSA
+          - name: no-rsa
+            wolfssl_config: --enable-wolftpm --disable-rsa
+            test_command: "make check && WOLFSSL_PATH=./wolfssl WOLFCRYPT_RSA=0 ./examples/run_examples.sh"
+            needs_install: true
+
+          # Default configure (no AES CFB, no PKCS7, no crypto cb, no cert gen)
+          - name: default-configure
+            wolfssl_config: ""
+            wolfssl_cflags: "-DWOLFSSL_PUBLIC_MP"
+            test_command: "make check && WOLFSSL_PATH=./wolfssl WOLFCRYPT_DEFAULT=1 ./examples/run_examples.sh"
+            needs_install: true
+
+          # No filesystem
+          - name: no-filesystem
+            wolfssl_config: --enable-wolftpm --disable-filesystem --enable-singlethreaded
+            test_command: "make check && WOLFSSL_PATH=./wolfssl NO_FILESYSTEM=1 ./examples/run_examples.sh"
+            needs_install: true
+
+          # Old wolfSSL (v4.7.0)
+          # Builds latest wolfSSL for examples/client/client and examples/server/server
+          # Builds old wolfSSL (v4.7.0) for linking wolfTPM against older shared library
+          - name: old-wolfssl
+            test_command: "make check && WOLFSSL_PATH=./wolfssl NO_PUBASPRIV=1 ./examples/run_examples.sh"
+            needs_install: true
+
+    steps:
+      - name: Checkout wolfTPM
+        uses: actions/checkout@master
+
+      - name: Checkout wolfSSL
+        uses: actions/checkout@master
+        with:
+          repository: wolfssl/wolfssl
+          path: wolfssl
+          ref: ${{ matrix.wolfssl_ref || 'master' }}
+
+      - name: Setup wolfSSL
+        working-directory: ./wolfssl
+        run: |
+          ./autogen.sh
+          WOLFSSL_CONFIG="${{ matrix.wolfssl_config || '--enable-wolftpm --enable-pkcallbacks' }}"
+          WOLFSSL_CFLAGS="${{ matrix.wolfssl_cflags || '' }}"
+          if [ -n "$WOLFSSL_CFLAGS" ]; then
+            ./configure $WOLFSSL_CONFIG CFLAGS="$WOLFSSL_CFLAGS"
+          else
+            ./configure $WOLFSSL_CONFIG
+          fi
+          make
+          sudo make install
+          sudo ldconfig
+
+      # For old-wolfssl test: checkout and build old wolfSSL for linking
+      - name: Checkout old wolfSSL
+        if: matrix.name == 'old-wolfssl'
+        uses: actions/checkout@master
+        with:
+          repository: wolfssl/wolfssl
+          path: wolfssl-old
+          ref: v4.7.0-stable
+      - name: Apply wolfssl-v4.7.0.patch to old wolfSSL
+        if: matrix.name == 'old-wolfssl'
+        working-directory: ./wolfssl-old
+        run: |
+          git apply ../.github/workflows/wolfssl-v4.7.0.patch
+      - name: Setup old wolfSSL for linking
+        if: matrix.name == 'old-wolfssl'
+        working-directory: ./wolfssl-old
+        run: |
+          ./autogen.sh
+          ./configure --enable-wolftpm --disable-examples CFLAGS="-DWOLFSSL_PUBLIC_MP -DWOLFSSL_TEST_CERT -DWOLFSSL_KEY_GEN -DNO_WRITEV"
+
+          make
+          sudo make install
+          sudo ldconfig
+
+      - name: Setup ibmswtpm2
+        if: matrix.needs_swtpm == true || matrix.needs_swtpm == null
+        uses: actions/checkout@master
+        with:
+          repository: kgoldman/ibmswtpm2
+          path: ibmswtpm2
+
+      - name: Generate TPM port
+        if: matrix.needs_swtpm == true || matrix.needs_swtpm == null
+        run: |
+          # Generate deterministic port from matrix name (base 40000, spacing 2 for port+1)
+          MATRIX_HASH=$(echo -n "${{ matrix.name }}" | cksum | cut -d' ' -f1)
+          TPM_PORT=$((40000 + (MATRIX_HASH % 1000) * 2))
+          echo "TPM_PORT=$TPM_PORT" >> $GITHUB_ENV
+          echo "TPM2_SWTPM_PORT=$TPM_PORT" >> $GITHUB_ENV
+          echo "Generated TPM port: $TPM_PORT (matrix: ${{ matrix.name }})"
+
+      - name: Start TPM simulator
+        if: matrix.needs_swtpm == true || matrix.needs_swtpm == null
+        working-directory: ./ibmswtpm2/src
+        run: |
+          make
+          echo "Starting TPM simulator on port $TPM_PORT"
+          ./tpm_server -port $TPM_PORT &
+
+      - name: Install mono
+        if: matrix.needs_mono == true
+        run: |
+          sudo apt-get install -y mono-mcs mono-tools-devel nunit nunit-console
+
+      - name: Build wolfTPM
+        run: |
+          ./autogen.sh
+          WOLFTPM_CONFIG="${{ matrix.wolftpm_config || '--enable-swtpm' }}"
+          WOLFTPM_CFLAGS="${{ matrix.wolftpm_cflags || '' }}"
+          WOLFTPM_CC="${{ matrix.wolftpm_cc || '' }}"
+          # Add TPM port to configure if SWTPM is needed
+          if [ -n "$TPM_PORT" ]; then
+            WOLFTPM_CONFIG="$WOLFTPM_CONFIG --with-swtpm-port=$TPM_PORT"
+          fi
+          if [ -n "$WOLFTPM_CC" ]; then
+            if [ -n "$WOLFTPM_CFLAGS" ]; then
+              CC="$WOLFTPM_CC" ./configure $WOLFTPM_CONFIG CFLAGS="$WOLFTPM_CFLAGS"
+            else
+              CC="$WOLFTPM_CC" ./configure $WOLFTPM_CONFIG
+            fi
+          else
+            if [ -n "$WOLFTPM_CFLAGS" ]; then
+              ./configure $WOLFTPM_CONFIG CFLAGS="$WOLFTPM_CFLAGS"
+            else
+              ./configure $WOLFTPM_CONFIG
+            fi
+          fi
+          make
+
+      - name: Run tests
+        if: matrix.test_command && matrix.test_command != 'true'
+        run: ${{ matrix.test_command }}
+
+      - name: Install
+        if: matrix.needs_install == true
+        run: |
+          sudo make install
+          sudo ldconfig
+
+      - name: Build CSharp wrapper
+        if: matrix.csharp_test == true
+        working-directory: ./wrapper/CSharp
+        run: |
+          mcs wolfTPM.cs wolfTPM-tests.cs -r:/usr/lib/cli/nunit.framework-2.6.3/nunit.framework.dll -t:library
+          LD_LIBRARY_PATH=../../src/.libs/:../../wolfssl/src/.libs/ nunit-console wolfTPM.dll -run=tpm_csharp_test.WolfTPMTest.TrySelfTest
+          LD_LIBRARY_PATH=../../src/.libs/:../../wolfssl/src/.libs/ nunit-console wolfTPM.dll
+
+      - name: Make dist
+        if: matrix.needs_dist == true
+        run: |
+          make dist
+          make distcheck
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wolftpm-test-logs-${{ matrix.name }}
+          path: |
+            run.out
+            test-suite.log
+            wolftpm-*/_build/sub/test-suite.log
+          retention-days: 5

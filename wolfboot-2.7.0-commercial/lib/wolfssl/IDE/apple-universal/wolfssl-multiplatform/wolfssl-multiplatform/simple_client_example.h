@@ -1,0 +1,17 @@
+/* simple_client_example.h
+ *
+ * Copyright (C) 2014-2025 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#ifndef SIMPLE_CLIENT_EXAMPLE_H
+#define SIMPLE_CLIENT_EXAMPLE_H
+
+int simple_client_example(void);
+
+#endif /* SIMPLE_CLIENT_EXAMPLE_H */

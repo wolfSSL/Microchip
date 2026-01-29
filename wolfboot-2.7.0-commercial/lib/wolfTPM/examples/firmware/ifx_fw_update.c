@@ -1,0 +1,237 @@
+/* ifx_fw_update.c
+ *
+ * Copyright (C) 2014-2025 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+/* This tool will perform a firmware update on Infineon SLB9672 or SLB9673
+ * TPM 2.0 module */
+
+#ifdef HAVE_CONFIG_H
+    #include <config.h>
+#endif
+
+#include <wolftpm/tpm2_wrap.h>
+
+#if defined(WOLFTPM_FIRMWARE_UPGRADE) && \
+    (defined(WOLFTPM_SLB9672) || defined(WOLFTPM_SLB9673))
+
+#include <examples/firmware/ifx_fw_update.h>
+#include <examples/tpm_test_keys.h>
+#include <hal/tpm_io.h>
+
+/******************************************************************************/
+/* --- BEGIN TPM2.0 Firmware Update tool  -- */
+/******************************************************************************/
+
+static void usage(void)
+{
+    printf("Infineon Firmware Update Usage:\n");
+    printf("\t./ifx_fw_update (get info)\n");
+    printf("\t./ifx_fw_update --abandon (cancel)\n");
+    printf("\t./ifx_fw_update <manifest_file> <firmware_file>\n");
+}
+
+typedef struct {
+    byte*  manifest_buf;
+    byte*  firmware_buf;
+    size_t manifest_bufSz;
+    size_t firmware_bufSz;
+} fw_info_t;
+
+static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
+    uint32_t offset, void* cb_ctx)
+{
+    fw_info_t* fwinfo = (fw_info_t*)cb_ctx;
+    if (offset > fwinfo->firmware_bufSz) {
+        return BUFFER_E;
+    }
+    if (offset + data_req_sz > (uint32_t)fwinfo->firmware_bufSz) {
+        data_req_sz = (uint32_t)fwinfo->firmware_bufSz - offset;
+    }
+    if (data_req_sz > 0) {
+        XMEMCPY(data, &fwinfo->firmware_buf[offset], data_req_sz);
+    }
+    return data_req_sz;
+}
+
+static const char* TPM2_IFX_GetOpModeStr(int opMode)
+{
+    const char* opModeStr = "Unknown";
+    switch (opMode) {
+        case 0x00:
+            opModeStr = "Normal TPM operational mode";
+            break;
+        case 0x01:
+            opModeStr = "TPM firmware update mode (abandon possible)";
+            break;
+        case 0x02:
+            opModeStr = "TPM firmware update mode (abandon not possible)";
+            break;
+        case 0x03:
+            opModeStr = "After successful update, but before finalize";
+            break;
+        case 0x04:
+            opModeStr = "After finalize or abandon, reboot required";
+            break;
+        default:
+            break;
+    }
+    return opModeStr;
+}
+
+static void TPM2_IFX_PrintInfo(WOLFTPM2_CAPS* caps)
+{
+    printf("Mfg %s (%d), Vendor %s, Fw %u.%u (0x%x)\n",
+        caps->mfgStr, caps->mfg, caps->vendorStr, caps->fwVerMajor,
+        caps->fwVerMinor, caps->fwVerVendor);
+    printf("Operational mode: %s (0x%x)\n",
+        TPM2_IFX_GetOpModeStr(caps->opMode), caps->opMode);
+    printf("KeyGroupId 0x%x, FwCounter %d (%d same)\n",
+        caps->keyGroupId, caps->fwCounter, caps->fwCounterSame);
+}
+
+int TPM2_IFX_Firmware_Update(void* userCtx, int argc, char *argv[])
+{
+    int rc;
+    WOLFTPM2_DEV dev;
+    WOLFTPM2_CAPS caps;
+    const char* manifest_file = NULL;
+    const char* firmware_file = NULL;
+    fw_info_t fwinfo;
+    int abandon = 0, recovery = 0;
+
+    XMEMSET(&fwinfo, 0, sizeof(fwinfo));
+
+    if (argc >= 2) {
+        if (XSTRCMP(argv[1], "-?") == 0 ||
+            XSTRCMP(argv[1], "-h") == 0 ||
+            XSTRCMP(argv[1], "--help") == 0) {
+            usage();
+            return 0;
+        }
+        if (XSTRCMP(argv[1], "--abandon") == 0) {
+            abandon = 1;
+        }
+        else {
+            manifest_file = argv[1];
+            if (argc >= 3) {
+                firmware_file = argv[2];
+            }
+        }
+    }
+
+    printf("Infineon Firmware Update Tool\n");
+    if (manifest_file != NULL)
+        printf("\tManifest File: %s\n", manifest_file);
+    if (firmware_file != NULL)
+        printf("\tFirmware File: %s\n", firmware_file);
+
+    rc = wolfTPM2_Init(&dev, TPM2_IoCb, userCtx);
+    if (rc != TPM_RC_SUCCESS) {
+        printf("wolfTPM2_Init failed 0x%x: %s\n", rc, TPM2_GetRCString(rc));
+        goto exit;
+    }
+
+    rc = wolfTPM2_GetCapabilities(&dev, &caps);
+    if (rc != TPM_RC_SUCCESS) {
+        goto exit;
+    }
+    TPM2_IFX_PrintInfo(&caps);
+    if (caps.keyGroupId == 0) {
+        printf("Error getting key group id from TPM!\n");
+    }
+    if (caps.opMode == 0x02 || (caps.opMode & 0x80)) {
+        /* if opmode == 2 or 0x8x then we need to use recovery mode */
+        recovery = 1;
+    }
+
+    if (abandon) {
+        printf("Firmware Update Abandon:\n");
+        rc = wolfTPM2_FirmwareUpgradeCancel(&dev);
+        if (rc != 0) {
+            printf("Abandon failed 0x%x: %s\n", rc, TPM2_GetRCString(rc));
+        }
+        else {
+            printf("Success: Please reset or power cycle TPM\n");
+        }
+        return rc;
+    }
+
+    if (manifest_file == NULL || firmware_file == NULL) {
+        if (argc > 1) {
+            printf("Manifest file or firmware file arguments missing!\n");
+        }
+        goto exit;
+    }
+
+    /* load manifest and data files */
+    rc = loadFile(manifest_file,
+        &fwinfo.manifest_buf, &fwinfo.manifest_bufSz);
+    if (rc == 0) {
+        rc = loadFile(firmware_file,
+            &fwinfo.firmware_buf, &fwinfo.firmware_bufSz);
+    }
+    if (rc == 0) {
+        if (recovery) {
+            printf("Firmware Update (recovery mode):\n");
+            rc = wolfTPM2_FirmwareUpgradeRecover(&dev,
+                fwinfo.manifest_buf, (uint32_t)fwinfo.manifest_bufSz,
+                TPM2_IFX_FwData_Cb, &fwinfo);
+        }
+        else {
+            printf("Firmware Update (normal mode):\n");
+            rc = wolfTPM2_FirmwareUpgrade(&dev,
+                fwinfo.manifest_buf, (uint32_t)fwinfo.manifest_bufSz,
+                TPM2_IFX_FwData_Cb, &fwinfo);
+        }
+    }
+    if (rc == 0) {
+        TPM2_IFX_PrintInfo(&caps);
+    }
+
+exit:
+
+    if (rc != 0) {
+        printf("Infineon firmware update failed 0x%x: %s\n",
+            rc, TPM2_GetRCString(rc));
+    }
+
+    XFREE(fwinfo.firmware_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    XFREE(fwinfo.manifest_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    wolfTPM2_Cleanup(&dev);
+
+    return rc;
+}
+
+/******************************************************************************/
+/* --- END TPM2.0 Firmware Update tool  -- */
+/******************************************************************************/
+#endif /* WOLFTPM_FIRMWARE_UPGRADE && (WOLFTPM_SLB9672 || WOLFTPM_SLB9673) */
+
+#ifndef NO_MAIN_DRIVER
+int main(int argc, char *argv[])
+{
+    int rc = -1;
+
+#if defined(WOLFTPM_FIRMWARE_UPGRADE) && \
+    (defined(WOLFTPM_SLB9672) || defined(WOLFTPM_SLB9673))
+    rc = TPM2_IFX_Firmware_Update(NULL, argc, argv);
+#else
+    printf("Support for firmware upgrade not compiled in!\n"
+        "See --enable-firmware or WOLFTPM_FIRMWARE_UPGRADE\n");
+    printf("This tool is for the Infineon SLB9672 or SLB9673 TPMs only\n"
+        "\t--enable-infineon=slb9672 (WOLFTPM_SLB9672)\n"
+        "\t--enable-infineon=slb9673 --enable-i2c (WOLFTPM_SLB9673)\n");
+    (void)argc;
+    (void)argv;
+#endif
+
+    return rc;
+}
+#endif /* !NO_MAIN_DRIVER */

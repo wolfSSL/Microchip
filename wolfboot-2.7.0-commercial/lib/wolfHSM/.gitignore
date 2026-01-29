@@ -1,0 +1,21 @@
+.DS_Store
+Build/
+*.o
+*.a
+*.la
+**/.gdb_history
+tools/testcertgen/ca/
+tools/testcertgen/*.der
+*.code-workspace
+.vscode
+compile_commands.json
+
+# Static analysis
+tools/static-analysis/reports/
+*.xml
+*.html
+
+# Code coverage
+*.gcda
+*.gcno
+coverage/

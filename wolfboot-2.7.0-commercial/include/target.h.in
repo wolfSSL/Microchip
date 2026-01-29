@@ -1,0 +1,102 @@
+/* target.h
+ *
+ * User configurable build-time options for bootloader and application offsets
+ *
+ * target.h is automatically generated using the template in target.h.in by running
+ * "make config".
+ *
+ * Copyright (C) 2014-2025 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#ifndef H_TARGETS_TARGET_
+#define H_TARGETS_TARGET_
+
+
+#ifndef WOLFBOOT_NO_PARTITIONS
+#    define WOLFBOOT_FIXED_PARTITIONS
+#endif
+
+#define WOLFBOOT_SECTOR_SIZE                 @WOLFBOOT_SECTOR_SIZE@
+
+#ifdef WOLFBOOT_FIXED_PARTITIONS
+
+#if defined(ARCH_SIM) && !defined(WOLFBOOT_PARTITION_FILENAME)
+    #include <stdint.h>
+    /* use runtime ram base for simulator */
+    extern uint8_t *sim_ram_base;
+    #undef  ARCH_FLASH_OFFSET
+    #define ARCH_FLASH_OFFSET ((size_t)sim_ram_base)
+    #define WOLFBOOT_PART_USE_ARCH_OFFSET
+#endif
+
+#ifdef PULL_LINKER_DEFINES
+    #include <stdint.h>
+
+    /* linker script variables */
+    extern const uint32_t _wolfboot_nsc_address[];
+    extern const uint32_t _wolfboot_nsc_size[];
+    extern const uint32_t _wolfboot_partition_boot_address[];
+    extern const uint32_t _wolfboot_partition_size[];
+    extern const uint32_t _wolfboot_partition_update_address[];
+    extern const uint32_t _wolfboot_partition_swap_address[];
+
+    /* create plain integers from linker script variables */
+    static const uint32_t WOLFBOOT_NSC_ADDRESS = (uint32_t)_wolfboot_nsc_address;
+    static const uint32_t WOLFBOOT_NSC_SIZE = (uint32_t)_wolfboot_nsc_size;
+    static const uint32_t WOLFBOOT_PARTITION_BOOT_ADDRESS = (uint32_t)_wolfboot_partition_boot_address;
+    static const uint32_t WOLFBOOT_PARTITION_SIZE = (uint32_t)_wolfboot_partition_size;
+    static const uint32_t WOLFBOOT_PARTITION_UPDATE_ADDRESS = (uint32_t)_wolfboot_partition_update_address;
+    static const uint32_t WOLFBOOT_PARTITION_SWAP_ADDRESS = (uint32_t)_wolfboot_partition_swap_address;
+#else
+    #if defined(WOLFBOOT_PART_USE_ARCH_OFFSET)
+        #if !defined(EXT_FLASH) || (defined(EXT_FLASH) && !defined(PART_BOOT_EXT))
+            #define WOLFBOOT_PARTITION_BOOT_ADDRESS   (ARCH_FLASH_OFFSET + @WOLFBOOT_PARTITION_BOOT_ADDRESS@)
+        #endif
+        #if !defined(EXT_FLASH) || (defined(EXT_FLASH) && !defined(PART_UPDATE_EXT))
+            #define WOLFBOOT_PARTITION_UPDATE_ADDRESS (ARCH_FLASH_OFFSET + @WOLFBOOT_PARTITION_UPDATE_ADDRESS@)
+        #endif
+        #if !defined(EXT_FLASH) || (defined(EXT_FLASH) && !defined(PART_SWAP_EXT))
+            #define WOLFBOOT_PARTITION_SWAP_ADDRESS   (ARCH_FLASH_OFFSET + @WOLFBOOT_PARTITION_SWAP_ADDRESS@)
+        #endif
+    #endif
+
+    /* use values provided on input template parsing */
+    #ifndef WOLFBOOT_NSC_ADDRESS
+    #define WOLFBOOT_NSC_ADDRESS              @WOLFBOOT_NSC_ADDRESS@
+    #endif
+    #ifndef WOLFBOOT_NSC_SIZE
+    #define WOLFBOOT_NSC_SIZE                 @WOLFBOOT_NSC_SIZE@
+    #endif
+    #ifndef WOLFBOOT_PARTITION_BOOT_ADDRESS
+    #define WOLFBOOT_PARTITION_BOOT_ADDRESS   @WOLFBOOT_PARTITION_BOOT_ADDRESS@
+    #endif
+    #ifndef WOLFBOOT_PARTITION_UPDATE_ADDRESS
+    #define WOLFBOOT_PARTITION_UPDATE_ADDRESS @WOLFBOOT_PARTITION_UPDATE_ADDRESS@
+    #endif
+    #ifndef WOLFBOOT_PARTITION_SWAP_ADDRESS
+    #define WOLFBOOT_PARTITION_SWAP_ADDRESS   @WOLFBOOT_PARTITION_SWAP_ADDRESS@
+    #endif
+    #ifndef WOLFBOOT_PARTITION_SIZE
+    #define WOLFBOOT_PARTITION_SIZE           @WOLFBOOT_PARTITION_SIZE@
+    #endif
+#endif
+
+#define WOLFBOOT_DTS_BOOT_ADDRESS             @WOLFBOOT_DTS_BOOT_ADDRESS@
+#define WOLFBOOT_DTS_UPDATE_ADDRESS           @WOLFBOOT_DTS_UPDATE_ADDRESS@
+
+#endif /* WOLFBOOT_FIXED_PARTITIONS */
+
+#if !defined(WOLFBOOT_NO_LOAD_ADDRESS)
+/* Load address in RAM for staged OS (update_ram only) */
+#define WOLFBOOT_LOAD_ADDRESS                 @WOLFBOOT_LOAD_ADDRESS@
+#endif
+#define WOLFBOOT_LOAD_DTS_ADDRESS             @WOLFBOOT_LOAD_DTS_ADDRESS@
+
+
+#endif /* !H_TARGETS_TARGET_ */

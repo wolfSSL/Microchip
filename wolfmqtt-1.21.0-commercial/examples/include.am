@@ -1,0 +1,224 @@
+# vim:ft=automake
+# All paths should be given relative to the root
+
+if BUILD_EXAMPLES
+noinst_PROGRAMS += examples/mqttclient/mqttclient \
+                   examples/mqttsimple/mqttsimple \
+                   examples/firmware/fwpush \
+                   examples/firmware/fwclient \
+                   examples/azure/azureiothub \
+                   examples/aws/awsiot \
+                   examples/wiot/wiot \
+                   examples/nbclient/nbclient \
+                   examples/multithread/multithread \
+                   examples/pub-sub/mqtt-pub \
+                   examples/pub-sub/mqtt-sub
+if BUILD_SN
+noinst_PROGRAMS += examples/sn-client/sn-client \
+                   examples/sn-client/sn-client_qos-1 \
+                   examples/sn-client/sn-multithread
+endif
+
+noinst_HEADERS +=  examples/mqttclient/mqttclient.h \
+                   examples/mqttsimple/mqttsimple.h \
+                   examples/firmware/fwpush.h \
+                   examples/firmware/fwclient.h \
+                   examples/firmware/firmware.h \
+                   examples/azure/azureiothub.h \
+                   examples/aws/awsiot.h \
+                   examples/wiot/wiot.h \
+                   examples/mqttnet.h \
+                   examples/mqttexample.h \
+                   examples/mqttport.h \
+                   examples/nbclient/nbclient.h \
+                   examples/multithread/multithread.h \
+                   examples/pub-sub/mqtt-pub-sub.h
+if BUILD_SN
+noinst_HEADERS +=  examples/sn-client/sn-client.h
+endif
+
+# MQTT Client Example
+examples_mqttclient_mqttclient_SOURCES      = examples/mqttclient/mqttclient.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_mqttclient_mqttclient_LDADD        = src/libwolfmqtt.la
+examples_mqttclient_mqttclient_DEPENDENCIES = src/libwolfmqtt.la
+examples_mqttclient_mqttclient_CPPFLAGS     = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+
+# MQTT Client Simple Example (self contained)
+examples_mqttsimple_mqttsimple_SOURCES      = examples/mqttsimple/mqttsimple.c
+examples_mqttsimple_mqttsimple_LDADD        = src/libwolfmqtt.la
+examples_mqttsimple_mqttsimple_DEPENDENCIES = src/libwolfmqtt.la
+
+
+# MQTT Multi-threading example
+examples_multithread_multithread_SOURCES      = examples/multithread/multithread.c \
+                                                examples/mqttnet.c \
+                                                examples/mqttexample.c
+examples_multithread_multithread_LDADD        = src/libwolfmqtt.la
+examples_multithread_multithread_DEPENDENCIES = src/libwolfmqtt.la
+examples_multithread_multithread_CPPFLAGS     = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+
+# MQTT Non-Blocking Client Example
+examples_nbclient_nbclient_SOURCES          = examples/nbclient/nbclient.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_nbclient_nbclient_LDADD            = src/libwolfmqtt.la
+examples_nbclient_nbclient_DEPENDENCIES     = src/libwolfmqtt.la
+examples_nbclient_nbclient_CPPFLAGS         = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+
+# Firmware Examples
+examples_firmware_fwpush_SOURCES            = examples/firmware/fwpush.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_firmware_fwpush_LDADD              = src/libwolfmqtt.la
+examples_firmware_fwpush_DEPENDENCIES       = src/libwolfmqtt.la
+examples_firmware_fwpush_CPPFLAGS           = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+examples_firmware_fwclient_SOURCES          = examples/firmware/fwclient.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_firmware_fwclient_LDADD            = src/libwolfmqtt.la
+examples_firmware_fwclient_DEPENDENCIES     = src/libwolfmqtt.la
+examples_firmware_fwclient_CPPFLAGS         = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+
+# Microsoft Azure IoT Hub Example
+examples_azure_azureiothub_SOURCES          = examples/azure/azureiothub.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_azure_azureiothub_LDADD            = src/libwolfmqtt.la
+examples_azure_azureiothub_DEPENDENCIES     = src/libwolfmqtt.la
+examples_azure_azureiothub_CPPFLAGS         = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+
+# Amazon Web Services Example
+examples_aws_awsiot_SOURCES                 = examples/aws/awsiot.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_aws_awsiot_LDADD                   = src/libwolfmqtt.la
+examples_aws_awsiot_DEPENDENCIES            = src/libwolfmqtt.la
+examples_aws_awsiot_CPPFLAGS                = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+
+# IBM Watson IoT Example
+examples_wiot_wiot_SOURCES                  = examples/wiot/wiot.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_wiot_wiot_LDADD                    = src/libwolfmqtt.la
+examples_wiot_wiot_DEPENDENCIES             = src/libwolfmqtt.la
+examples_wiot_wiot_CPPFLAGS                 = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+if BUILD_SN
+# MQTT-SN Examples
+examples_sn_client_sn_client_SOURCES        = examples/sn-client/sn-client.c \
+                                              examples/mqttnet.c \
+                                              examples/mqttexample.c
+examples_sn_client_sn_client_LDADD          = src/libwolfmqtt.la
+examples_sn_client_sn_client_DEPENDENCIES   = src/libwolfmqtt.la
+examples_sn_client_sn_client_CPPFLAGS       = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+examples_sn_client_sn_client_qos_1_SOURCES      = examples/sn-client/sn-client_qos-1.c \
+                                                  examples/mqttnet.c \
+                                                  examples/mqttexample.c
+examples_sn_client_sn_client_qos_1_LDADD        = src/libwolfmqtt.la
+examples_sn_client_sn_client_qos_1_DEPENDENCIES = src/libwolfmqtt.la
+examples_sn_client_sn_client_qos_1_CPPFLAGS     = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+examples_sn_client_sn_multithread_SOURCES       = examples/sn-client/sn-multithread.c \
+                                                  examples/mqttnet.c \
+                                                  examples/mqttexample.c
+examples_sn_client_sn_multithread_LDADD         = src/libwolfmqtt.la
+examples_sn_client_sn_multithread_DEPENDENCIES  = src/libwolfmqtt.la
+examples_sn_client_sn_multithread_CPPFLAGS      = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+endif
+
+# MQTT pub and sub clients
+examples_pub_sub_mqtt_pub_SOURCES      = examples/pub-sub/mqtt-pub.c \
+                                         examples/mqttnet.c \
+                                         examples/mqttexample.c
+examples_pub_sub_mqtt_pub_LDADD        = src/libwolfmqtt.la
+examples_pub_sub_mqtt_pub_DEPENDENCIES = src/libwolfmqtt.la
+examples_pub_sub_mqtt_pub_CPPFLAGS     = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+examples_pub_sub_mqtt_sub_SOURCES      = examples/pub-sub/mqtt-sub.c \
+                                         examples/mqttnet.c \
+                                         examples/mqttexample.c
+examples_pub_sub_mqtt_sub_LDADD        = src/libwolfmqtt.la
+examples_pub_sub_mqtt_sub_DEPENDENCIES = src/libwolfmqtt.la
+examples_pub_sub_mqtt_sub_CPPFLAGS     = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+
+# WebSocket example
+if BUILD_WEBSOCKET
+noinst_HEADERS += examples/websocket/net_libwebsockets.h
+noinst_PROGRAMS += examples/websocket/websocket_client
+examples_websocket_websocket_client_SOURCES      = examples/websocket/websocket_client.c \
+                                                   examples/websocket/net_libwebsockets.c \
+                                                   examples/mqttnet.c \
+                                                   examples/mqttexample.c
+examples_websocket_websocket_client_LDADD        = src/libwolfmqtt.la
+examples_websocket_websocket_client_DEPENDENCIES = src/libwolfmqtt.la
+examples_websocket_websocket_client_CPPFLAGS     = -I$(top_srcdir)/examples $(AM_CPPFLAGS)
+endif
+endif
+
+
+dist_example_DATA+= examples/mqttnet.c \
+                    examples/mqttexample.c \
+                    examples/mqttport.c \
+                    examples/mqttclient/mqttclient.c \
+                    examples/mqttsimple/mqttsimple.c \
+                    examples/firmware/fwpush.c \
+                    examples/firmware/fwclient.c \
+                    examples/azure/azureiothub.c \
+                    examples/aws/awsiot.c \
+                    examples/wiot/wiot.c
+dist_example_DATA+= examples/nbclient/nbclient.c
+dist_example_DATA+= examples/multithread/multithread.c
+if BUILD_SN
+dist_example_DATA+= examples/sn-client/sn-client.c
+dist_example_DATA+= examples/sn-client/sn-client_qos-1.c
+dist_example_DATA+= examples/sn-client/sn-multithread.c
+endif
+dist_example_DATA+= examples/pub-sub/mqtt-pub.c
+dist_example_DATA+= examples/pub-sub/mqtt-sub.c
+if BUILD_WEBSOCKET
+dist_example_DATA+= examples/websocket/websocket_client.c
+dist_example_DATA+= examples/websocket/net_libwebsockets.c
+endif
+
+DISTCLEANFILES+=   examples/mqttclient/.libs/mqttclient \
+                   examples/firmware/.libs/fwpush \
+                   examples/firmware/.libs/fwclient \
+                   examples/azure/.libs/azureiothub \
+                   examples/aws/.libs/awsiot \
+                   examples/wiot/.libs/wiot \
+                   examples/nbclient/.libs/nbclient \
+                   examples/multithread/.libs/multithread \
+                   examples/pub-sub/mqtt-pub \
+                   examples/pub-sub/mqtt-sub
+if BUILD_SN
+DISTCLEANFILES+=   examples/sn-client/.libs/sn-client \
+                   examples/sn-client/.libs/sn-client_qos-1 \
+                   examples/sn-client/.libs/sn-multithread
+endif
+if BUILD_WEBSOCKET
+DISTCLEANFILES+=   examples/websocket/.libs/websocket_client
+endif
+
+EXTRA_DIST+=       examples/mqttuart.c \
+                   examples/threadx/threadx_netx.c \
+                   examples/publish.dat \
+                   examples/mqttclient/mqttclient.vcxproj \
+                   examples/nbclient/nbclient.vcxproj \
+                   examples/firmware/fwclient.vcxproj \
+                   examples/firmware/fwpush.vcxproj \
+                   examples/azure/azureiothub.vcxproj \
+                   examples/aws/awsiot.vcxproj \
+                   examples/wiot/wiot.vcxproj \
+                   examples/sn-client/sn-client.vcxproj \
+                   examples/sn-client/README.md \
+                   examples/multithread/multithread.vcxproj
