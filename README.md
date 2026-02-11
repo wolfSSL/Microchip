@@ -5,7 +5,9 @@ use with the Microchip silicon products and/or development tools with which
 our wolfSSL products are integrated.
 
 This code is only properly licensed when following the license terms in the
-license file included in the root of this repository.
+license file included in the root of this repository:
+
+[LICENSE\_WOLFSSL\_MICROCHIP\_v12052025.txt](LICENSE_WOLFSSL_MICROCHIP_v12052025.txt)
 
 ### Library Version Information
 
