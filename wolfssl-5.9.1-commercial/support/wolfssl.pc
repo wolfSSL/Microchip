@@ -1,0 +1,11 @@
+prefix=/usr/local
+exec_prefix=/usr/local
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: wolfssl
+Description: wolfssl C library.
+Version: 5.9.1
+Libs: -L${libdir} -lwolfssl
+Libs.private: -lm 
+Cflags: -I${includedir}

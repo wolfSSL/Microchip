@@ -18,7 +18,7 @@ This repository currently contains the following wolfSSL product versions.
 |wolfBoot|2.7.0 stable|Latest release of wolfBoot|
 |wolfMQTT|1.21.0 stable|Latest release of wolfMQTT|
 |wolfSSH|1.4.22 stable|Latest release of wolfSSH|
-|wolfSSL|5.8.4 stable|Latest release of wolfSSL|
+|wolfSSL|5.9.1 stable|Latest release of wolfSSL|
 
 ## Product Descriptions and Details
 
