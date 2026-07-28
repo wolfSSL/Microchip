@@ -16,6 +16,7 @@ This repository currently contains the following wolfSSL product versions.
 |Product|Version|Notes|
 |:--|:--|:--|
 |wolfBoot|2.9.0 stable|Latest release of wolfBoot|
+|wolfHSM|1.4.0 stable|Latest release of wolfMQTT|
 |wolfMQTT|2.1.0 stable|Latest release of wolfMQTT|
 |wolfSSH|1.5.0 stable|Latest release of wolfSSH|
 |wolfSSL|5.9.2 stable|Latest release of wolfSSL|
@@ -28,6 +29,7 @@ pages for each product included here.
 |Product|Product Page|
 |:--|:--|
 |wolfBoot|[wolfBoot Product Page](https://www.wolfssl.com/products/wolfboot/)|
+|wolfHSM|[wolfHSM Product Page](https://www.wolfssl.com/products/wolfhsm/)|
 |wolfMQTT|[wolfMQTT Product Page](https://www.wolfssl.com/products/wolfmqtt/)|
 |wolfSSH|[wolfSSH Product Page](https://www.wolfssl.com/products/wolfssh/)|
 |wolfSSL|[wolfSSL Product Page](https://www.wolfssl.com/products/wolfssl/)|
@@ -40,6 +42,7 @@ product manuals.
 |Product|Manual Link|
 |:--|:--|
 |wolfBoot|[wolfBoot Manual](https://www.wolfssl.com/documentation/manuals/wolfboot/)|
+|wolfHSM|[wolfHSM Manual](https://www.wolfssl.com/documentation/manuals/wolfhsm/)|
 |wolfMQTT|[wolfMQTT Manual](https://www.wolfssl.com/documentation/manuals/wolfmqtt/)|
 |wolfSSH|[wolfSSH Manual](https://www.wolfssl.com/documentation/manuals/wolfssh/)|
 |wolfSSL|[wolfSSL Manual](https://www.wolfssl.com/documentation/manuals/wolfssl/)|
