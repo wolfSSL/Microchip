@@ -1,0 +1,37 @@
+# vim:ft=automake
+# included from Top Level Makefile.am
+# All paths should be given relative to the root
+
+
+lib_LTLIBRARIES+=  src/libwolfmqtt.la
+src_libwolfmqtt_la_SOURCES = src/mqtt_client.c \
+                             src/mqtt_packet.c \
+                             src/mqtt_socket.c
+
+if BUILD_SN
+src_libwolfmqtt_la_SOURCES += src/mqtt_sn_client.c \
+                              src/mqtt_sn_packet.c
+endif
+
+src_libwolfmqtt_la_CFLAGS       = -DBUILDING_WOLFMQTT $(AM_CFLAGS)
+src_libwolfmqtt_la_CPPFLAGS     = -DBUILDING_WOLFMQTT $(AM_CPPFLAGS)
+src_libwolfmqtt_la_LDFLAGS      = ${AM_LDFLAGS} -no-undefined -version-info ${WOLFMQTT_LIBRARY_VERSION} 
+src_libwolfmqtt_la_DEPENDENCIES =
+
+EXTRA_DIST +=
+
+if BUILD_BROKER
+bin_PROGRAMS += src/mqtt_broker
+src_mqtt_broker_SOURCES      = src/mqtt_broker.c \
+                               src/mqtt_broker_persist.c \
+                               src/mqtt_broker_persist_posix.c
+src_mqtt_broker_CFLAGS       = $(AM_CFLAGS)
+src_mqtt_broker_CPPFLAGS     = $(AM_CPPFLAGS)
+src_mqtt_broker_LDFLAGS      = -Lsrc
+src_mqtt_broker_LDADD        = src/libwolfmqtt.la $(LTLIBEVENT) $(LIB_STATIC_ADD)
+src_mqtt_broker_DEPENDENCIES = src/libwolfmqtt.la
+if BUILD_WEBSOCKET
+src_mqtt_broker_LDADD += -lwebsockets
+endif
+endif
+
