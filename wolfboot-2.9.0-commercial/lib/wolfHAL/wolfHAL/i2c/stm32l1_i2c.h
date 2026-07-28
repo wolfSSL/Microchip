@@ -1,0 +1,124 @@
+/* stm32l1_i2c.h
+ *
+ * Copyright (C) 2014-2026 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#ifndef WHAL_STM32L1_I2C_H
+#define WHAL_STM32L1_I2C_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include <wolfHAL/i2c/i2c.h>
+#include <wolfHAL/timeout.h>
+
+/**
+ * @file stm32l1_i2c.h
+ * @brief STM32L1 I2C driver configuration.
+ *
+ * The STM32L1 uses the V1 I2C peripheral with CR1/CR2/DR/SR1/SR2/CCR/TRISE
+ * registers. This driver supports controller mode with polling:
+ * - Standard-mode (up to 100 kHz) and Fast-mode (up to 400 kHz)
+ * - 7-bit and 10-bit addressing
+ */
+
+/**
+ * @brief I2C device configuration.
+ */
+typedef struct whal_Stm32l1_I2c_Cfg {
+    uint32_t pclk;         /**< APB1 clock frequency in Hz */
+    whal_Timeout *timeout; /**< Timeout instance */
+    uint16_t _addr;        /**< Target address (set by StartCom) */
+    uint8_t _addrSz;       /**< Address size in bits (set by StartCom) */
+} whal_Stm32l1_I2c_Cfg;
+
+/*
+ * @brief Single-instance device struct. Defined in the driver TU
+ * from the WHAL_CFG_STM32L1_I2C_DEV initializer in board.h.
+ */
+#ifdef WHAL_CFG_STM32L1_I2C_SINGLE_INSTANCE
+extern const whal_I2c whal_Stm32l1_I2c_Dev;
+#endif
+
+#ifndef WHAL_CFG_STM32L1_I2C_DIRECT_API_MAPPING
+/**
+ * @brief Driver instance for STM32L1 I2C peripheral.
+ */
+extern const whal_I2cDriver whal_Stm32l1_I2c_Driver;
+
+/**
+ * @brief Initialize the STM32L1 I2C peripheral.
+ *
+ * Resets the peripheral and enables it.
+ *
+ * @param i2cDev I2C device instance to initialize.
+ *
+ * @retval WHAL_SUCCESS Initialization completed.
+ * @retval WHAL_EINVAL  Invalid arguments.
+ */
+whal_Error whal_Stm32l1_I2c_Init(whal_I2c *i2cDev);
+
+/**
+ * @brief Deinitialize the STM32L1 I2C peripheral.
+ *
+ * Disables the peripheral.
+ *
+ * @param i2cDev I2C device instance to deinitialize.
+ *
+ * @retval WHAL_SUCCESS Deinit completed.
+ * @retval WHAL_EINVAL  Invalid arguments.
+ */
+whal_Error whal_Stm32l1_I2c_Deinit(whal_I2c *i2cDev);
+
+/**
+ * @brief Begin a communication session on the STM32L1 I2C peripheral.
+ *
+ * Computes CCR and TRISE from the configured pclk and the requested
+ * frequency, then stores the target address for use by Transfer.
+ *
+ * @param i2cDev  I2C device instance.
+ * @param comCfg  Per-session communication parameters.
+ *
+ * @retval WHAL_SUCCESS Communication session started.
+ * @retval WHAL_EINVAL  Invalid arguments.
+ */
+whal_Error whal_Stm32l1_I2c_StartCom(whal_I2c *i2cDev, whal_I2c_ComCfg *comCfg);
+
+/**
+ * @brief End the current communication session on the STM32L1 I2C peripheral.
+ *
+ * Clears the stored target address.
+ *
+ * @param i2cDev  I2C device instance.
+ *
+ * @retval WHAL_SUCCESS Communication session ended.
+ * @retval WHAL_EINVAL  Invalid arguments.
+ */
+whal_Error whal_Stm32l1_I2c_EndCom(whal_I2c *i2cDev);
+
+/**
+ * @brief Execute a sequence of I2C messages on the bus.
+ *
+ * Supports 7-bit and 10-bit addressing with the V1 I2C master transmitter
+ * and receiver sequences. Handles 1-byte, 2-byte, and N-byte receive with
+ * the correct ACK/POS/STOP sequencing per RM0038.
+ *
+ * @param i2cDev  I2C device instance.
+ * @param msgs    Array of message descriptors.
+ * @param numMsgs Number of messages in the array.
+ *
+ * @retval WHAL_SUCCESS    All messages transferred successfully.
+ * @retval WHAL_EINVAL     Invalid arguments.
+ * @retval WHAL_ETIMEOUT   Hardware did not respond in time.
+ * @retval WHAL_EHARDWARE  NACK or bus error detected.
+ */
+whal_Error whal_Stm32l1_I2c_Transfer(whal_I2c *i2cDev, whal_I2c_Msg *msgs,
+                                     size_t numMsgs);
+#endif /* !WHAL_CFG_STM32L1_I2C_DIRECT_API_MAPPING */
+
+#endif /* WHAL_STM32L1_I2C_H */

@@ -1,0 +1,35 @@
+/* stm32wba_aes.c
+ *
+ * Copyright (C) 2014-2026 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+/* Forward STM32WBA AES direct API mapping flags to STM32WB */
+#ifdef WHAL_CFG_STM32WBA_AES_INIT_DIRECT_API_MAPPING
+#define WHAL_CFG_STM32WB_AES_INIT_DIRECT_API_MAPPING
+#endif
+#ifdef WHAL_CFG_STM32WBA_AES_ECB_DIRECT_API_MAPPING
+#define WHAL_CFG_STM32WB_AES_ECB_DIRECT_API_MAPPING
+#endif
+#ifdef WHAL_CFG_STM32WBA_AES_CBC_DIRECT_API_MAPPING
+#define WHAL_CFG_STM32WB_AES_CBC_DIRECT_API_MAPPING
+#endif
+#ifdef WHAL_CFG_STM32WBA_AES_CTR_DIRECT_API_MAPPING
+#define WHAL_CFG_STM32WB_AES_CTR_DIRECT_API_MAPPING
+#endif
+#ifdef WHAL_CFG_STM32WBA_AES_GCM_DIRECT_API_MAPPING
+#define WHAL_CFG_STM32WB_AES_GCM_DIRECT_API_MAPPING
+#endif
+#ifdef WHAL_CFG_STM32WBA_AES_GMAC_DIRECT_API_MAPPING
+#define WHAL_CFG_STM32WB_AES_GMAC_DIRECT_API_MAPPING
+#endif
+#ifdef WHAL_CFG_STM32WBA_AES_CCM_DIRECT_API_MAPPING
+#define WHAL_CFG_STM32WB_AES_CCM_DIRECT_API_MAPPING
+#endif
+
+#include "stm32wb_aes.c"

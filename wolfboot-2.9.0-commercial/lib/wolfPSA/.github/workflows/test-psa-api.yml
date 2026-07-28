@@ -1,0 +1,70 @@
+name: Test PSA API
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-psa-api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out wolfPSA
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool libtool-bin pkg-config
+
+      - name: Clone sibling wolfSSL
+        run: git clone --depth 1 https://github.com/wolfSSL/wolfssl ../wolfssl
+
+      - name: Build wolfPSA
+        run: make
+
+      - name: Build sibling wolfSSL for wolfPSA tests
+        run: make -C test rebuild-wolfssl-psa
+
+      - name: Build PSA API tests
+        run: >
+          make -C test
+          psa_api_test
+          psa_des3_stack_scrub_test
+          psa_ecc_bit_inference_test
+          psa_ecc_curve_id_test
+          psa_random_size_test
+          psa_rsa_pss_interop_test
+          psa_mldsa_test
+          psa_mlkem_test
+          psa_xof_test
+          psa_key_wrap_test
+          psa_sign_context_test
+          psa_lms_xmss_verify_test
+          psa_ascon_xchacha_test
+          psa_sp800_108_test
+          psa_14_misc_test
+
+      - name: Run PSA API tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}:${{ github.workspace }}/../wolfssl/src/.libs
+        run: |
+          for t in psa_api_test \
+                   psa_ecc_bit_inference_test \
+                   psa_des3_stack_scrub_test \
+                   psa_ecc_curve_id_test \
+                   psa_random_size_test \
+                   psa_rsa_pss_interop_test \
+                   psa_mldsa_test \
+                   psa_mlkem_test \
+                   psa_xof_test \
+                   psa_key_wrap_test \
+                   psa_sign_context_test \
+                   psa_lms_xmss_verify_test \
+                   psa_ascon_xchacha_test \
+                   psa_sp800_108_test \
+                   psa_14_misc_test; do
+            echo "=== $t ==="
+            rm -rf test/.store
+            ./test/$t
+          done

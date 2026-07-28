@@ -1,0 +1,162 @@
+/* ivt.c
+ *
+ * Copyright (C) 2014-2026 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#include <stdint.h>
+#include <stddef.h>
+
+extern uint32_t _estack[];
+extern uint32_t _sidata[];
+extern uint32_t _sdata[];
+extern uint32_t _edata[];
+extern uint32_t _sbss[];
+extern uint32_t _ebss[];
+
+extern void main();
+
+void __attribute__((naked,noreturn)) Default_Handler()
+{
+    while(1);
+}
+
+void Reset_Handler() __attribute__((weak));
+void NMI_Handler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void HardFault_Handler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void SVC_Handler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void PendSV_Handler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void SysTick_Handler() __attribute__((weak, noreturn, alias("Default_Handler")));
+
+/* STM32C031 peripheral interrupts */
+void WWDG_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void PVD_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void RTC_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void FLASH_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void RCC_CRS_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void EXTI0_1_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void EXTI2_3_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void EXTI4_15_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void USB_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void DMA1_Channel1_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void DMA1_Channel2_3_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void DMA1_Channel4_5_6_7_DMAMUX_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void ADC_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM1_BRK_UP_TRG_COM_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM1_CC_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM2_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM3_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM14_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM15_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM16_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void TIM17_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void I2C1_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void I2C2_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void SPI1_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void SPI2_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void USART1_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void USART2_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void USART3_4_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void FDCAN_IT0_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+void FDCAN_IT1_IRQHandler() __attribute__((weak, noreturn, alias("Default_Handler")));
+
+#define RESERVED Default_Handler
+
+void *memcpy(void *dest, const void *src, size_t n)
+{
+    unsigned char *d = dest;
+    const unsigned char *s = src;
+
+    for (size_t i = 0; i < n; i++)
+        d[i] = s[i];
+
+    return dest;
+}
+
+void *memset(void *s, int c, size_t n)
+{
+    unsigned char *p = s;
+    unsigned char v = (unsigned char)c;
+
+    for (size_t i = 0; i < n; i++)
+        p[i] = v;
+
+    return s;
+}
+
+void (* const interrupt_vector_table[])() __attribute__((section(".isr_vector"))) = {
+    (void (*)())_estack,
+    Reset_Handler,
+    NMI_Handler,
+    HardFault_Handler,
+    RESERVED,                                   /* Reserved */
+    RESERVED,                                   /* Reserved */
+    RESERVED,                                   /* Reserved */
+    RESERVED,                                   /* Reserved */
+    RESERVED,                                   /* Reserved */
+    RESERVED,                                   /* Reserved */
+    RESERVED,                                   /* Reserved */
+    SVC_Handler,
+    RESERVED,                                   /* Reserved */
+    RESERVED,                                   /* Reserved */
+    PendSV_Handler,
+    SysTick_Handler,
+    /* STM32C031 peripheral interrupts */
+    WWDG_IRQHandler,                            /* 0 */
+    PVD_IRQHandler,                             /* 1 */
+    RTC_IRQHandler,                             /* 2 */
+    FLASH_IRQHandler,                           /* 3 */
+    RCC_CRS_IRQHandler,                         /* 4 */
+    EXTI0_1_IRQHandler,                         /* 5 */
+    EXTI2_3_IRQHandler,                         /* 6 */
+    EXTI4_15_IRQHandler,                        /* 7 */
+    USB_IRQHandler,                             /* 8 */
+    DMA1_Channel1_IRQHandler,                   /* 9 */
+    DMA1_Channel2_3_IRQHandler,                 /* 10 */
+    DMA1_Channel4_5_6_7_DMAMUX_IRQHandler,      /* 11 */
+    ADC_IRQHandler,                             /* 12 */
+    TIM1_BRK_UP_TRG_COM_IRQHandler,            /* 13 */
+    TIM1_CC_IRQHandler,                         /* 14 */
+    TIM2_IRQHandler,                            /* 15 */
+    TIM3_IRQHandler,                            /* 16 */
+    RESERVED,                                   /* 17 */
+    RESERVED,                                   /* 18 */
+    TIM14_IRQHandler,                           /* 19 */
+    TIM15_IRQHandler,                           /* 20 */
+    TIM16_IRQHandler,                           /* 21 */
+    TIM17_IRQHandler,                           /* 22 */
+    I2C1_IRQHandler,                            /* 23 */
+    I2C2_IRQHandler,                            /* 24 */
+    SPI1_IRQHandler,                            /* 25 */
+    SPI2_IRQHandler,                            /* 26 */
+    USART1_IRQHandler,                          /* 27 */
+    USART2_IRQHandler,                          /* 28 */
+    USART3_4_IRQHandler,                        /* 29 */
+    FDCAN_IT0_IRQHandler,                       /* 30 */
+    FDCAN_IT1_IRQHandler,                       /* 31 */
+};
+
+void __attribute__((naked)) Reset_Handler()
+{
+    __asm__("ldr r0, =_estack\n\t"
+            "mov sp, r0");
+
+    /* Copy data section from flash to RAM */
+    uint32_t data_section_size = _edata - _sdata;
+    memcpy(_sdata, _sidata, data_section_size * 4);
+
+    /* Zero out bss */
+    uint32_t bss_section_size = _ebss - _sbss;
+    memset(_sbss, 0, bss_section_size * 4);
+
+    /* Set Interrupt Vector Table Offset */
+    uint32_t *vtor = (uint32_t *)0xE000ED08;
+    *vtor = (uint32_t)interrupt_vector_table;
+
+    main();
+}

@@ -1,0 +1,36 @@
+name: wolfSSL PSA Client Server
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  wolfssl-psa-client-server:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out wolfPSA
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool libtool-bin pkg-config
+
+      - name: Clone sibling wolfSSL
+        run: git clone --depth 1 https://github.com/wolfSSL/wolfssl ../wolfssl
+
+      - name: Build wolfPSA
+        run: make
+
+      - name: Rebuild sibling wolfSSL with wolfPSA enabled
+        run: make -C test rebuild-wolfssl-psa
+
+      - name: Build wolfPSA test binaries
+        run: make -C test
+
+      - name: Run wolfPSA wolfSSL client-server test
+        run: |
+          rm -rf test/.store
+          cd test
+          ./run_psa_tls_server_client.sh

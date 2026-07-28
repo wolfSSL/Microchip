@@ -1,0 +1,130 @@
+/* update_flash_hwswap.c
+ *
+ * Implementation for hardware assisted updater
+ *
+ *
+ * Copyright (C) 2014-2026 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#include "loader.h"
+#include "image.h"
+#include "hal.h"
+#include "hooks.h"
+#include "spi_flash.h"
+#include "wolfboot/wolfboot.h"
+#include "printf.h"
+#ifdef SECURE_PKCS11
+int WP11_Library_Init(void);
+#endif
+
+extern void hal_flash_dualbank_swap(void);
+
+static inline void boot_panic(void)
+{
+    while(1)
+        ;
+}
+
+void RAMFUNCTION wolfBoot_start(void)
+{
+    int active;
+    struct wolfBoot_image fw_image;
+    uint8_t p_state;
+    active = wolfBoot_dualboot_candidate();
+
+    if (active < 0) /* panic if no images available */
+        boot_panic();
+
+    for (;;) {
+#ifndef ALLOW_DOWNGRADE
+        uint32_t boot_v = wolfBoot_current_firmware_version();
+        uint32_t update_v = wolfBoot_update_firmware_version();
+        uint32_t max_v = (boot_v > update_v) ? boot_v : update_v;
+        uint32_t active_v = (active == PART_UPDATE) ? update_v : boot_v;
+        /* Anti-rollback defense-in-depth: wolfBoot_dualboot_candidate() always
+         * selects the max-version partition, and after a failed image is erased
+         * its version reads 0, so the remaining valid partition becomes the new
+         * max. This guard therefore should not normally trigger, but it is kept
+         * as a safety net in case a lower version is ever selected while a
+         * higher one is still present.
+         */
+        if ((max_v > 0U) && (active_v < max_v)) {
+            wolfBoot_printf("Rollback to lower version not allowed\n");
+            boot_panic();
+            return;
+        }
+#endif
+        if ((wolfBoot_open_image(&fw_image, active) < 0)
+#ifndef WOLFBOOT_SKIP_BOOT_VERIFY
+            || (wolfBoot_verify_integrity(&fw_image) < 0)
+            || (wolfBoot_verify_authenticity(&fw_image) < 0)
+#endif
+        ) {
+            /* panic if authentication fails and no backup */
+            if (!wolfBoot_fallback_is_possible())
+                boot_panic();
+            else {
+                /* Invalidate failing image and switch to the
+                 * other partition
+                 */
+                wolfBoot_erase_partition(active);
+                active ^= 1;
+            }
+        } else
+            break; /* candidate successfully authenticated */
+    }
+
+    /* First time we boot this update, set to TESTING to await
+     * confirmation from the system
+     */
+    if ((active == PART_BOOT) && (wolfBoot_get_partition_state(active, &p_state) == 0) &&
+        (p_state == IMG_STATE_UPDATING))
+    {
+        hal_flash_unlock();
+        wolfBoot_set_partition_state(active, IMG_STATE_TESTING);
+        hal_flash_lock();
+    }
+
+    /* Booting from update is possible via HW-assisted swap */
+    if (active == PART_UPDATE) {
+        hal_flash_dualbank_swap();
+        /* On some platform, e.g. STM32L5, hal_flash_dualbank_swap
+         * never returns. A reboot is triggered instead, so the code
+         * below is only executed if we are staging the firmware.
+         */
+        active = PART_BOOT;
+        if ((wolfBoot_get_partition_state(active, &p_state) == 0) &&
+                (p_state == IMG_STATE_UPDATING))
+        {
+            hal_flash_unlock();
+            wolfBoot_set_partition_state(active, IMG_STATE_TESTING);
+            hal_flash_lock();
+        }
+    }
+#ifdef SECURE_PKCS11
+    WP11_Library_Init();
+#endif
+#ifdef WOLFBOOT_ENABLE_WOLFHSM_CLIENT
+    (void)hal_hsm_disconnect();
+#elif defined(WOLFBOOT_ENABLE_WOLFHSM_SERVER)
+    (void)hal_hsm_server_cleanup();
+#endif
+#ifndef TZEN
+    if (hal_flash_protect(WOLFBOOT_ORIGIN, BOOTLOADER_PARTITION_SIZE) < 0)
+        boot_panic();
+#endif
+    hal_prepare_boot();
+#ifdef WOLFBOOT_HOOK_BOOT
+    wolfBoot_hook_boot(&fw_image);
+#endif
+#ifndef WOLFBOOT_SKIP_BOOT_VERIFY
+    PART_SANITY_CHECK(&fw_image);
+#endif
+    do_boot((void *)(WOLFBOOT_PARTITION_BOOT_ADDRESS + IMAGE_HEADER_SIZE));
+}

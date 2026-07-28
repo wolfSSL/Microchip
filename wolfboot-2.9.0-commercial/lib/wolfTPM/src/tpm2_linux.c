@@ -1,0 +1,244 @@
+/* tpm2_linux.c
+ *
+ * Copyright (C) 2014-2026 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+
+#ifdef HAVE_CONFIG_H
+    #include <config.h>
+#endif
+
+#include <wolftpm/tpm2_types.h>
+
+#if defined(WOLFTPM_LINUX_DEV) || defined(WOLFTPM_LINUX_DEV_AUTODETECT)
+#include <wolftpm/tpm2_linux.h>
+#include <wolftpm/tpm2_packet.h>
+
+#if defined(__UBOOT__)
+
+#include <config.h>
+#include <tpm-common.h>
+
+/* import u-boot function helper to get device */
+extern int tcg2_platform_get_tpm2(struct udevice **dev);
+
+/* Use the U-Boot TPM device and TIS layer */
+int TPM2_LINUX_SendCommand(TPM2_CTX* ctx, TPM2_Packet* packet)
+{
+    int rc;
+    struct udevice *dev;
+    size_t rspSz = 0;
+
+#ifdef WOLFTPM_DEBUG_VERBOSE
+    printf("Command size: %d\n", packet->pos);
+    TPM2_PrintBin(packet->buf, packet->pos);
+#endif
+
+    /* Get the TPM2 U-boot device */
+    rc = tcg2_platform_get_tpm2(&dev);
+    if (rc != 0 || dev == NULL) {
+    #ifdef DEBUG_WOLFTPM
+        printf("Failed to find TPM2 U-boot device: %d\n", rc);
+    #endif
+        rc = TPM_RC_FAILURE;
+    }
+    if (rc == 0) {
+        /* Transfer the device data using tpm_xfer */
+        rspSz = packet->size;
+        rc = tpm_xfer(dev, packet->buf, packet->pos, packet->buf, &rspSz);
+        if (rc != 0) {
+        #ifdef DEBUG_WOLFTPM
+            printf("tpm_xfer failed with error: %d\n", rc);
+        #endif
+            rc = TPM_RC_FAILURE;
+        }
+    }
+
+#ifdef WOLFTPM_DEBUG_VERBOSE
+    if (rspSz > 0) {
+        printf("Response size: %d\n", (int)rspSz);
+        TPM2_PrintBin(packet->buf, rspSz);
+    }
+#endif
+
+    (void)ctx;
+
+    return rc;
+}
+
+#else /* __linux__ */
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <poll.h>
+#include <errno.h>
+#include <string.h>
+
+/* TPM Device Path Configuration:
+ * - /dev/tpmrm0: TPM resource manager (requires kernel 5.12+), preferred as it
+ *                isolates and flushes per-connection transient objects/sessions
+ * - /dev/tpm0: TPM raw device, no in-kernel resource management
+ * The default prefers the resource manager and falls back to the raw device
+ * when it is unavailable. Define WOLFTPM_USE_TPMRM for resource manager only,
+ * or set TPM2_LINUX_DEV to pin a specific device.
+ */
+#ifndef TPM2_LINUX_DEV
+#ifdef WOLFTPM_USE_TPMRM
+    #define TPM2_LINUX_DEV "/dev/tpmrm0"
+#else
+    #define TPM2_LINUX_DEV "/dev/tpmrm0"
+    #define TPM2_LINUX_DEV_FALLBACK "/dev/tpm0"
+#endif
+#endif
+
+#ifndef TPM2_LINUX_DEV_POLL_TIMEOUT
+#define TPM2_LINUX_DEV_POLL_TIMEOUT -1 /* Infinite time for poll events */
+#endif
+
+/* Linux kernels older than v4.20 (before December 2018) do not support
+ * partial reads. The only way to receive a complete response is to read
+ * the maximum allowed TPM response from the kernel, which is 4K. And most
+ * of the ARM systems use older kernels, such as the RPI that uses v4.12
+ */
+
+/* Talk to a TPM device exposed by the Linux tpm_tis driver */
+int TPM2_LINUX_SendCommand(TPM2_CTX* ctx, TPM2_Packet* packet)
+{
+    int rc = TPM_RC_FAILURE;
+    int rc_poll, nfds = 1; /* Polling single TPM dev file */
+    struct pollfd fds;
+    int rspSz = 0;
+    const char* devName = TPM2_LINUX_DEV;
+
+#ifdef WOLFTPM_DEBUG_VERBOSE
+    printf("Command size: %d\n", packet->pos);
+    TPM2_PrintBin(packet->buf, packet->pos);
+#endif
+
+    if (ctx->fd < 0) {
+        ctx->fd = open(TPM2_LINUX_DEV, O_RDWR | O_NONBLOCK);
+#ifdef TPM2_LINUX_DEV_FALLBACK
+        if (ctx->fd < 0) {
+            ctx->fd = open(TPM2_LINUX_DEV_FALLBACK, O_RDWR | O_NONBLOCK);
+            if (ctx->fd >= 0)
+                devName = TPM2_LINUX_DEV_FALLBACK;
+        }
+#endif
+    }
+    if (ctx->fd >= 0) {
+        /* Send the TPM command */
+        if (write(ctx->fd, packet->buf, packet->pos) == packet->pos) {
+            fds.fd = ctx->fd;
+            fds.events = POLLIN;
+            /* Wait for response to be available */
+            rc_poll = poll(&fds, nfds, TPM2_LINUX_DEV_POLL_TIMEOUT);
+            if (rc_poll > 0 && (fds.revents & POLLIN)) {
+                ssize_t ret = read(ctx->fd, packet->buf, packet->size);
+                /* The caller parses the TPM_Packet for correctness */
+                if (ret >= TPM2_HEADER_SIZE) {
+                    /* Enough bytes for a TPM response */
+                    rspSz = (int)ret;
+                    rc = TPM_RC_SUCCESS;
+                }
+                else {
+                #ifdef DEBUG_WOLFTPM
+                    if (ret == 0) {
+                        printf("Received EOF from %s\n", devName);
+                    }
+                    else {
+                        printf("Failed to read from %s (ret %zd):"
+                            " errno %d = %s\n", devName, ret,
+                            errno, strerror(errno));
+                    }
+                #endif
+                    rc = TPM_RC_FAILURE;
+                }
+            }
+            else {
+            #ifdef DEBUG_WOLFTPM
+                printf("Failed poll on %s: errno %d = %s\n",
+                    devName, errno, strerror(errno));
+            #endif
+                rc = TPM_RC_FAILURE;
+            }
+        }
+        else {
+        #ifdef DEBUG_WOLFTPM
+            printf("Failed write to %s: errno %d = %s\n",
+                devName, errno, strerror(errno));
+        #endif
+            rc = TPM_RC_FAILURE;
+        }
+    }
+    else if (ctx->fd == -1 && errno == EACCES) {
+        printf("Permission denied on %s\n"
+            "Use sudo or add tss group to user.\n", devName);
+    }
+    else {
+    #ifdef DEBUG_WOLFTPM
+        printf("Failed to open %s: errno %d = %s\n",
+            devName, errno, strerror(errno));
+    #endif
+    }
+
+#ifdef WOLFTPM_DEBUG_VERBOSE
+    if (rspSz > 0) {
+        printf("Response size: %d\n", (int)rspSz);
+        TPM2_PrintBin(packet->buf, rspSz);
+    }
+#else
+    (void)rspSz;
+#endif
+    return rc;
+}
+#endif /* __UBOOT__ __linux__ */
+
+#ifdef WOLFTPM_LINUX_DEV_AUTODETECT
+#include <wolftpm/tpm2_tis.h>
+
+int TPM2_LINUX_TryOpen(TPM2_CTX* ctx)
+{
+    /* Try resource manager first (kernel 4.12+), then raw device */
+    ctx->fd = open("/dev/tpmrm0", O_RDWR | O_NONBLOCK);
+    if (ctx->fd >= 0) {
+    #ifdef DEBUG_WOLFTPM
+        printf("Opened /dev/tpmrm0\n");
+    #endif
+        return TPM_RC_SUCCESS;
+    }
+
+    ctx->fd = open("/dev/tpm0", O_RDWR | O_NONBLOCK);
+    if (ctx->fd >= 0) {
+    #ifdef DEBUG_WOLFTPM
+        printf("Opened /dev/tpm0\n");
+    #endif
+        return TPM_RC_SUCCESS;
+    }
+
+    /* Distinguish "not available" from "permission denied" */
+    if (errno == EACCES) {
+        printf("Permission denied on /dev/tpm0\n"
+            "Use sudo or add tss group to user.\n");
+        return TPM_RC_FAILURE;
+    }
+
+    /* ENOENT or other: device not present, caller should try SPI */
+    return TPM_RC_INITIALIZE; /* sentinel: "not found, try next" */
+}
+
+int TPM2_LINUX_AUTODETECT_SendCommand(TPM2_CTX* ctx, TPM2_Packet* packet)
+{
+    if (ctx->fd >= 0)
+        return TPM2_LINUX_SendCommand(ctx, packet);
+    return TPM2_TIS_SendCommand(ctx, packet);
+}
+#endif /* WOLFTPM_LINUX_DEV_AUTODETECT */
+
+#endif /* WOLFTPM_LINUX_DEV || WOLFTPM_LINUX_DEV_AUTODETECT */

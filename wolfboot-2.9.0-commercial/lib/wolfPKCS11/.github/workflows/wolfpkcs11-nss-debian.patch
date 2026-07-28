@@ -1,0 +1,30 @@
+diff '--color=auto' -ur a/debian/control b/debian/control
+--- a/debian/control	2022-05-31 22:30:45.000000000 +0100
++++ b/debian/control	2025-08-14 16:47:27.639784242 +0100
+@@ -19,7 +19,8 @@
+ Architecture: any
+ Pre-Depends: ${misc:Pre-Depends}
+ Depends: ${shlibs:Depends},
+- ${misc:Depends}
++ ${misc:Depends},
++ libwolfpkcs11 (>= 2.0.0)
+ Multi-Arch: same
+ Description: Network Security Service libraries
+  This is a set of libraries designed to support cross-platform development
+diff '--color=auto' -ur a/debian/rules b/debian/rules
+--- a/debian/rules	2022-08-23 22:57:38.000000000 +0100
++++ b/debian/rules	2025-08-14 16:11:46.719487807 +0100
+@@ -183,13 +183,6 @@
+ 	$(foreach lib,libsoftokn3.so libfreebl3.so libfreeblpriv3.so libnssdbm3.so, \
+ 		$(call cmd,umask 022; $(SHLIBSIGN) -v -i debian/libnss3/usr/lib/$(DEB_HOST_MULTIARCH)/$(lib)))
+ 
+-ifeq ($(DEB_HOST_ARCH),$(DEB_BUILD_ARCH))
+-	# Check FIPS mode correctly works
+-	mkdir debian/tmp
+-	LD_LIBRARY_PATH=debian/libnss3/usr/lib/$(DEB_HOST_MULTIARCH) debian/libnss3-tools/usr/bin/modutil -create -dbdir debian/tmp < /dev/null
+-	LD_LIBRARY_PATH=debian/libnss3/usr/lib/$(DEB_HOST_MULTIARCH) debian/libnss3-tools/usr/bin/modutil -fips true -dbdir debian/tmp < /dev/null
+-endif
+-
+ override_dh_makeshlibs:
+ 	dh_makeshlibs -a -- -c4
+ 

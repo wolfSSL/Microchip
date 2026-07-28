@@ -1,0 +1,129 @@
+name: Build with installed wolfSSL (WOLFSSL_LIB)
+
+# Exercises the WOLFSSL_LIB=1 build mode, which links wolfHSM against an
+# installed libwolfssl rather than compiling the wolfSSL sources in-tree.
+
+on:
+  push:
+    branches: [ 'master', 'main', 'release/**' ]
+  pull_request:
+    branches: [ '*' ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Checkout wolfssl
+      uses: actions/checkout@v4
+      with:
+        repository: wolfssl/wolfssl
+        path: wolfssl
+
+    - name: Build and install wolfssl
+      # HAVE_ANONYMOUS_INLINE_AGGREGATES toggles the layout of wc_CryptoInfo
+      # (anonymous union vs named .u member). wolfHSM requires the anonymous
+      # form.
+      run: |
+        cd wolfssl
+        ./autogen.sh
+        ./configure \
+          --disable-benchmark \
+          --disable-crypttests \
+          --disable-examples \
+          --enable-all \
+          --enable-cryptocb \
+          --prefix=$HOME/wolfssl-install \
+          CFLAGS="-DWOLFSSL_PUBLIC_MP -DWOLFSSL_SHA512_HASHTYPE -DWOLFSSL_PUBLIC_ASN -DHAVE_ANONYMOUS_INLINE_AGGREGATES=1 -DNO_MAIN_DRIVER"
+        make -j
+        make install
+
+    - name: Build test (WOLFSSL_LIB=1)
+      run: |
+        cd test
+        make clean
+        make -j WOLFSSL_LIB=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Build test (WOLFSSL_LIB=1 DMA=1 ASAN=1)
+      run: |
+        cd test
+        make clean
+        make -j WOLFSSL_LIB=1 DMA=1 ASAN=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Build test (WOLFSSL_LIB=1 SHE=1)
+      run: |
+        cd test
+        make clean
+        make -j WOLFSSL_LIB=1 SHE=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Build test (WOLFSSL_LIB=1 AUTH=1)
+      run: |
+        cd test
+        make clean
+        make -j WOLFSSL_LIB=1 AUTH=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    # NOCRYPTO short-circuits the wolfssl source compile entirely, but we
+    # still want to make sure WOLFSSL_LIB=1 doesn't break that path.
+    - name: Build test (WOLFSSL_LIB=1 NOCRYPTO=1)
+      run: |
+        cd test
+        make clean
+        make -j WOLFSSL_LIB=1 NOCRYPTO=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Build benchmark (WOLFSSL_LIB=1)
+      run: |
+        cd benchmark
+        make clean
+        make -j WOLFSSL_LIB=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Build POSIX server example (WOLFSSL_LIB=1)
+      run: |
+        cd examples/posix/wh_posix_server
+        make clean
+        make -j WOLFSSL_LIB=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Build POSIX client example (WOLFSSL_LIB=1)
+      run: |
+        cd examples/posix/wh_posix_client
+        make clean
+        make -j WOLFSSL_LIB=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Build whnvmtool (WOLFSSL_LIB=1)
+      run: |
+        cd tools/whnvmtool
+        make clean
+        make WOLFSSL_LIB=1 \
+          WOLFSSL_DIR=$HOME/wolfssl-install/include \
+          WOLFSSL_LIBDIR=$HOME/wolfssl-install/lib
+
+    - name: Run POSIX server/client smoke test (WOLFSSL_LIB=1)
+      run: |
+        export LD_LIBRARY_PATH=$HOME/wolfssl-install/lib:$LD_LIBRARY_PATH
+        cd examples/posix/wh_posix_server
+        ./Build/wh_posix_server.elf --type tcp &
+        SERVER_PID=$!
+        sleep 1
+        cd ../wh_posix_client
+        ./Build/wh_posix_client.elf --type tcp
+        kill $SERVER_PID || true

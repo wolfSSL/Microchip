@@ -1,0 +1,29 @@
+name: Peripheral Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  peripheral-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - board: stm32wb55xx_nucleo
+            peripherals: spi_nor_w25q64
+            tests: flash
+          - board: stm32wb55xx_nucleo
+            peripherals: sdhc_spi_sdcard32gb
+            tests: block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Build tests
+        working-directory: tests
+        run: make BOARD=${{ matrix.board }} PERIPHERALS="${{ matrix.peripherals }}" TESTS="${{ matrix.tests }}"

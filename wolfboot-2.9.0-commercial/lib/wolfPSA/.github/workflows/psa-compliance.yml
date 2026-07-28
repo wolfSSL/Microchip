@@ -1,0 +1,29 @@
+name: PSA Compliance
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  psa-compliance:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out wolfPSA
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git
+
+      - name: Clone sibling wolfSSL
+        run: git clone --depth 1 https://github.com/wolfSSL/wolfssl ../wolfssl
+
+      - name: Build wolfPSA
+        run: make
+
+      - name: Run PSA compliance tests
+        run: ./test-psa-api/psa-crypto-tests.sh

@@ -1,0 +1,1621 @@
+/*
+ * Copyright (C) 2014-2026 wolfSSL Inc.  All rights reserved.
+ *
+ * This file is part of wolfBoot.
+ *
+ * Contact licensing@wolfssl.com with any questions or comments.
+ *
+ * https://www.wolfssl.com
+ */
+/*
+ * wolfhsm/wh_message_crypto.h
+ *
+ * Message structures and translation functions for crypto operations.
+ */
+
+#ifndef WOLFHSM_WH_MESSAGE_CRYPTO_H_
+#define WOLFHSM_WH_MESSAGE_CRYPTO_H_
+
+/* Pick up compile-time configuration */
+#include "wolfhsm/wh_settings.h"
+
+#include <stdint.h>
+
+#include "wolfhsm/wh_common.h"
+#include "wolfhsm/wh_message.h"
+#include "wolfhsm/wh_utils.h"
+
+/*
+ * Crypto Message Protocol Packet Structure
+ *
+ * +---------------------------+
+ * |                           |
+ * |      Comm Buffer Data     |
+ * |                           |
+ * | +-------------------------+
+ * | |                         |
+ * | | Generic Crypto Header   | <- Size of whMessageCrypto_GenericHeader
+ * | | (Request or Response)   |    Could be either:
+ * | |                         |    - whMessageCrypto_GenericRequestHeader
+ * | |                         |       (client -> server)
+ * | |                         |    - whMessageCrypto_GenericResponseHeader
+ * | |                         |       (server -> client)
+ * | +-------------------------+
+ * | |                         |
+ * | | Crypto-Specific Header  | <- Algorithm-specific request/response
+ * | |                         |    (e.g., AesGcm, Rsa, Ecc, etc.)
+ * | +-------------------------+
+ * | |                         |
+ * | |                         |
+ * | |     Arbitrary Data      | <- Input/output data, keys, IVs, etc.
+ * | |                         |    (layout defined by specific algorithm)
+ * | |                         |
+ * | +-------------------------+
+ * |                           |
+ * +---------------------------+
+ */
+
+
+/* Indicates the algorithm type for the requested crypto operation. Corresponds
+ * to the wolfCrypt crypto callback subtype (e.g. cypher type, pk type, etc.) */
+typedef uint32_t whMessageCrypto_AlgoType;
+
+/* Generic crypto header message. This will always be the first element in any
+ * crypto message and indicates how to interpret the rest of the message. */
+typedef struct {
+    whMessageCrypto_AlgoType algoType;    /* Type of crypto operation */
+    whMessageCrypto_AlgoType algoSubType; /* Subtype, specific to algoType.
+                                             Right now only used for PQ algos */
+#define WH_MESSAGE_CRYPTO_ALGO_SUBTYPE_NONE 0
+    uint32_t affinity; /* Crypto affinity for this request */
+} whMessageCrypto_GenericRequestHeader;
+
+/* Generic crypto response header message. This must always be the first element
+ * in the response message. */
+typedef struct {
+    whMessageCrypto_AlgoType algoType; /* Type of crypto operation */
+    int32_t                  rc;       /* Return code */
+    uint32_t                 reserved; /* Reserved for future use */
+} whMessageCrypto_GenericResponseHeader;
+
+WH_UTILS_STATIC_ASSERT(
+    sizeof(whMessageCrypto_GenericRequestHeader) ==
+        sizeof(whMessageCrypto_GenericResponseHeader),
+    "GenericRequestHeader and GenericResponseHeader must be the same size");
+
+/* Size allocated in the comm buffer data for the crypto request and response
+ * headers. Because crypto operations process data in-place in the comm buffer,
+ * the header sizes for the request and response protocol messages must be the
+ * same. If they are not, then crypto input and output buffers will not overlap,
+ * and crypto operations will fail in mysterious ways. */
+typedef union {
+    whMessageCrypto_GenericRequestHeader  request;
+    whMessageCrypto_GenericResponseHeader response;
+} whMessageCrypto_GenericHeader;
+
+int wh_MessageCrypto_TranslateGenericRequestHeader(
+    uint16_t magic, const whMessageCrypto_GenericRequestHeader* src,
+    whMessageCrypto_GenericRequestHeader* dest);
+
+int wh_MessageCrypto_TranslateGenericResponseHeader(
+    uint16_t magic, const whMessageCrypto_GenericResponseHeader* src,
+    whMessageCrypto_GenericResponseHeader* dest);
+
+
+/*
+ * RNG
+ */
+
+/* RNG Request */
+typedef struct {
+    uint32_t sz; /* Size of output data */
+} whMessageCrypto_RngRequest;
+
+/* RNG Response */
+typedef struct {
+    uint32_t sz; /* Size of output data */
+    /* Data follows:
+     * uint8_t out[sz]
+     */
+} whMessageCrypto_RngResponse;
+
+/* Maximum number of random bytes that can be returned inline (after the generic
+ * crypto response header and the RngResponse struct) in a single comm-buffer
+ * message. Async callers must chunk requests larger than this; the blocking
+ * wrapper handles chunking automatically. */
+#define WH_MESSAGE_CRYPTO_RNG_MAX_INLINE_SZ                    \
+    (WOLFHSM_CFG_COMM_DATA_LEN -                               \
+     (uint32_t)sizeof(whMessageCrypto_GenericResponseHeader) - \
+     (uint32_t)sizeof(whMessageCrypto_RngResponse))
+
+int wh_MessageCrypto_TranslateRngRequest(uint16_t magic,
+                                         const whMessageCrypto_RngRequest* src,
+                                         whMessageCrypto_RngRequest* dest);
+
+int wh_MessageCrypto_TranslateRngResponse(
+    uint16_t magic, const whMessageCrypto_RngResponse* src,
+    whMessageCrypto_RngResponse* dest);
+
+
+/*
+ * AES
+ */
+/* AES CTR Request - fields ordered by size to keep padding trailing */
+typedef struct {
+    uint32_t enc;       /* 1 for encrypt, 0 for decrypt */
+    uint32_t keyLen;    /* Length of key in bytes */
+    uint32_t sz;        /* Size of input data */
+    uint32_t left;      /* unused bytes left from last call */
+    uint16_t keyId;     /* Key ID if using stored key */
+    uint8_t  WH_PAD[2];
+    /* Data follows:
+     * uint8_t in[sz]
+     * uint8_t key[keyLen]
+     * uint8_t iv[AES_IV_SIZE]
+     * uint8_t tmp[AES_BLOCK_SIZE]
+     */
+} whMessageCrypto_AesCtrRequest;
+
+/* AES CTR Response */
+typedef struct {
+    uint32_t sz;   /* Size of output data */
+    uint32_t left; /* unused bytes left from last call */
+    /* Pad to ensure overlap for input and output buffers */
+    uint8_t
+        WH_PAD[sizeof(whMessageCrypto_AesCtrRequest) - (sizeof(uint32_t) * 2)];
+    /* Data follows:
+     * uint8_t out[sz]
+     * uint8_t reg[AES_BLOCK_SIZE]
+     * uint8_t tmp[AES_BLOCK_SIZE]
+     */
+} whMessageCrypto_AesCtrResponse;
+
+WH_UTILS_STATIC_ASSERT(
+    sizeof(whMessageCrypto_AesCtrRequest) ==
+        sizeof(whMessageCrypto_AesCtrResponse),
+    "AesCtrRequest and AesCtrResponse must be the same size");
+
+int wh_MessageCrypto_TranslateAesCtrRequest(
+    uint16_t magic, const whMessageCrypto_AesCtrRequest* src,
+    whMessageCrypto_AesCtrRequest* dest);
+
+int wh_MessageCrypto_TranslateAesCtrResponse(
+    uint16_t magic, const whMessageCrypto_AesCtrResponse* src,
+    whMessageCrypto_AesCtrResponse* dest);
+
+/* AES ECB Request */
+typedef struct {
+    uint32_t enc;       /* 1 for encrypt, 0 for decrypt */
+    uint32_t keyLen;    /* Length of key in bytes */
+    uint32_t sz;        /* Size of input data */
+    uint16_t keyId;     /* Key ID if using stored key */
+    uint8_t  WH_PAD[2]; /* Padding for alignment */
+    /* Data follows:
+     * uint8_t in[sz]
+     * uint8_t key[keyLen]
+     */
+} whMessageCrypto_AesEcbRequest;
+
+/* AES ECB Response */
+typedef struct {
+    uint32_t sz; /* Size of output data */
+    /* Pad to ensure overlap for input and output buffers */
+    uint8_t WH_PAD[sizeof(whMessageCrypto_AesEcbRequest) - sizeof(uint32_t)];
+    /* Data follows:
+     * uint8_t out[sz]
+     */
+} whMessageCrypto_AesEcbResponse;
+
+WH_UTILS_STATIC_ASSERT(
+    sizeof(whMessageCrypto_AesEcbRequest) ==
+        sizeof(whMessageCrypto_AesEcbResponse),
+    "AesEcbRequest and AesEcbResponse must be the same size");
+
+int wh_MessageCrypto_TranslateAesEcbRequest(
+    uint16_t magic, const whMessageCrypto_AesEcbRequest* src,
+    whMessageCrypto_AesEcbRequest* dest);
+
+int wh_MessageCrypto_TranslateAesEcbResponse(
+    uint16_t magic, const whMessageCrypto_AesEcbResponse* src,
+    whMessageCrypto_AesEcbResponse* dest);
+
+
+/* AES CBC Request */
+typedef struct {
+    uint32_t enc;       /* 1 for encrypt, 0 for decrypt */
+    uint32_t keyLen;    /* Length of key in bytes */
+    uint32_t sz;        /* Size of input data */
+    uint16_t keyId;     /* Key ID if using stored key */
+    uint8_t  WH_PAD[2]; /* Padding for alignment */
+    /* Data follows:
+     * uint8_t in[sz]
+     * uint8_t key[keyLen]
+     * uint8_t iv[AES_IV_SIZE]
+     */
+} whMessageCrypto_AesCbcRequest;
+
+/* AES CBC Response */
+typedef struct {
+    uint32_t sz; /* Size of output data */
+    /* Pad to ensure overlap for input and output buffers */
+    uint8_t WH_PAD[sizeof(whMessageCrypto_AesCbcRequest) - sizeof(uint32_t)];
+    /* Data follows:
+     * uint8_t out[sz]
+     * uint8_t iv[AES_IV_SIZE]
+     */
+} whMessageCrypto_AesCbcResponse;
+
+
+WH_UTILS_STATIC_ASSERT(sizeof(whMessageCrypto_AesCbcRequest) ==
+                   sizeof(whMessageCrypto_AesCbcResponse),
+               "AesCbcRequest and AesCbcResponse must be the same size");
+
+int wh_MessageCrypto_TranslateAesCbcRequest(
+    uint16_t magic, const whMessageCrypto_AesCbcRequest* src,
+    whMessageCrypto_AesCbcRequest* dest);
+
+int wh_MessageCrypto_TranslateAesCbcResponse(
+    uint16_t magic, const whMessageCrypto_AesCbcResponse* src,
+    whMessageCrypto_AesCbcResponse* dest);
+
+/* AES GCM Request */
+typedef struct {
+    uint32_t enc;       /* 1 for encrypt, 0 for decrypt */
+    uint32_t keyLen;    /* Length of key in bytes */
+    uint32_t sz;        /* Size of input data */
+    uint32_t ivSz;      /* Size of IV */
+    uint32_t authInSz;  /* Size of auth data */
+    uint32_t authTagSz; /* Size of auth tag */
+    uint16_t keyId;     /* Key ID if using stored key */
+    uint8_t  WH_PAD[2]; /* Padding for alignment */
+    /* Data follows:
+     * uint8_t in[sz]
+     * uint8_t key[keyLen]
+     * uint8_t iv[ivSz]
+     * uint8_t authIn[authInSz]
+     * uint8_t authTag[authTagSz]
+     */
+} whMessageCrypto_AesGcmRequest;
+
+/* AES GCM Response */
+typedef struct {
+    uint32_t sz;        /* Size of output data */
+    uint32_t authTagSz; /* Size of auth tag */
+    /* Pad to ensure overlap for input and output buffers */
+    uint8_t
+        WH_PAD[sizeof(whMessageCrypto_AesGcmRequest) - (sizeof(uint32_t) * 2)];
+    /* Data follows:
+     * uint8_t out[sz]
+     * uint8_t authTag[authTagSz]
+     */
+} whMessageCrypto_AesGcmResponse;
+
+WH_UTILS_STATIC_ASSERT(sizeof(whMessageCrypto_AesGcmRequest) ==
+                   sizeof(whMessageCrypto_AesGcmResponse),
+               "AesGcmRequest and AesGcmResponse must be the same size");
+
+int wh_MessageCrypto_TranslateAesGcmRequest(
+    uint16_t magic, const whMessageCrypto_AesGcmRequest* src,
+    whMessageCrypto_AesGcmRequest* dest);
+
+int wh_MessageCrypto_TranslateAesGcmResponse(
+    uint16_t magic, const whMessageCrypto_AesGcmResponse* src,
+    whMessageCrypto_AesGcmResponse* dest);
+
+/*
+ * RSA
+ */
+
+/* RSA Key Generation Request */
+typedef struct {
+    uint32_t flags;
+    uint32_t keyId;
+    uint32_t size;
+    uint32_t e;
+    uint8_t  label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_RsaKeyGenRequest;
+
+/* RSA Key Generation Response */
+typedef struct {
+    uint32_t keyId;
+    uint32_t len;
+    /* Data follows:
+     * uint8_t out[len];
+     */
+} whMessageCrypto_RsaKeyGenResponse;
+
+int wh_MessageCrypto_TranslateRsaKeyGenRequest(
+    uint16_t magic, const whMessageCrypto_RsaKeyGenRequest* src,
+    whMessageCrypto_RsaKeyGenRequest* dest);
+
+int wh_MessageCrypto_TranslateRsaKeyGenResponse(
+    uint16_t magic, const whMessageCrypto_RsaKeyGenResponse* src,
+    whMessageCrypto_RsaKeyGenResponse* dest);
+
+
+/* RSA Operation Request */
+typedef struct {
+    uint32_t opType;
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_RSA_OPTIONS_EVICT (1 << 0)
+    uint32_t keyId;
+    uint32_t inLen;
+    uint32_t outLen;
+    /* Data follows:
+     * uint8_t in[inLen];
+     */
+} whMessageCrypto_RsaRequest;
+
+/* RSA Operation Response */
+typedef struct {
+    uint32_t outLen;
+    /* Data follows:
+     * uint8_t out[outLen];
+     */
+} whMessageCrypto_RsaResponse;
+
+int wh_MessageCrypto_TranslateRsaRequest(uint16_t magic,
+                                         const whMessageCrypto_RsaRequest* src,
+                                         whMessageCrypto_RsaRequest* dest);
+
+int wh_MessageCrypto_TranslateRsaResponse(
+    uint16_t magic, const whMessageCrypto_RsaResponse* src,
+    whMessageCrypto_RsaResponse* dest);
+
+/* RSA Get Size Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_RSA_GET_SIZE_OPTIONS_EVICT (1 << 0)
+    uint32_t keyId;
+} whMessageCrypto_RsaGetSizeRequest;
+
+/* RSA Get Size Response */
+typedef struct {
+    uint32_t keySize;
+} whMessageCrypto_RsaGetSizeResponse;
+
+int wh_MessageCrypto_TranslateRsaGetSizeRequest(
+    uint16_t magic, const whMessageCrypto_RsaGetSizeRequest* src,
+    whMessageCrypto_RsaGetSizeRequest* dest);
+
+int wh_MessageCrypto_TranslateRsaGetSizeResponse(
+    uint16_t magic, const whMessageCrypto_RsaGetSizeResponse* src,
+    whMessageCrypto_RsaGetSizeResponse* dest);
+
+/*
+ * HKDF
+ */
+
+/* HKDF Request */
+typedef struct {
+    uint32_t flags;    /* NVM flags */
+    uint32_t keyIdIn;  /* Key ID for input key material (from cache) */
+    uint32_t keyIdOut; /* Key ID if caching output */
+    uint32_t hashType; /* WC_SHA256, etc. */
+    uint32_t inKeySz;  /* Input key material size */
+    uint32_t saltSz;   /* Salt size (0 if none) */
+    uint32_t infoSz;   /* Info size (0 if none) */
+    uint32_t outSz;    /* Output size */
+    uint8_t  label[WH_NVM_LABEL_LEN];
+    /* Data follows:
+     * uint8_t inKey[inKeySz]
+     * uint8_t salt[saltSz]
+     * uint8_t info[infoSz]
+     */
+} whMessageCrypto_HkdfRequest;
+
+/* HKDF Response */
+typedef struct {
+    uint32_t keyIdOut; /* Assigned key ID */
+    uint32_t outSz; /* Output size */
+    /* Data follows:
+     * uint8_t out[outSz]
+     */
+} whMessageCrypto_HkdfResponse;
+
+int wh_MessageCrypto_TranslateHkdfRequest(
+    uint16_t magic, const whMessageCrypto_HkdfRequest* src,
+    whMessageCrypto_HkdfRequest* dest);
+
+int wh_MessageCrypto_TranslateHkdfResponse(
+    uint16_t magic, const whMessageCrypto_HkdfResponse* src,
+    whMessageCrypto_HkdfResponse* dest);
+
+/*
+ * CMAC KDF
+ */
+
+typedef struct {
+    uint32_t flags;       /* NVM flags */
+    uint32_t keyIdSalt;   /* Key ID for salt material (from cache) */
+    uint32_t keyIdZ;      /* Key ID for Z material (from cache) */
+    uint32_t keyIdOut;    /* Key ID if caching output */
+    uint32_t saltSz;      /* Salt size (0 if using keyIdSalt) */
+    uint32_t zSz;         /* Z input size (0 if using keyIdZ) */
+    uint32_t fixedInfoSz; /* Fixed info size (0 if none) */
+    uint32_t outSz;       /* Output size */
+    uint8_t  label[WH_NVM_LABEL_LEN];
+    /* Data follows:
+     * uint8_t salt[saltSz]
+     * uint8_t z[zSz]
+     * uint8_t fixedInfo[fixedInfoSz]
+     */
+} whMessageCrypto_CmacKdfRequest;
+
+typedef struct {
+    uint32_t keyIdOut; /* Assigned key ID */
+    uint32_t outSz;    /* Output size */
+    /* Data follows:
+     * uint8_t out[outSz]
+     */
+} whMessageCrypto_CmacKdfResponse;
+
+int wh_MessageCrypto_TranslateCmacKdfRequest(
+    uint16_t magic, const whMessageCrypto_CmacKdfRequest* src,
+    whMessageCrypto_CmacKdfRequest* dest);
+
+int wh_MessageCrypto_TranslateCmacKdfResponse(
+    uint16_t magic, const whMessageCrypto_CmacKdfResponse* src,
+    whMessageCrypto_CmacKdfResponse* dest);
+
+/*
+ * ECC
+ */
+
+/* ECC Key Generation Request */
+typedef struct {
+    uint32_t sz;
+    uint32_t curveId;
+    uint32_t keyId;
+    uint32_t flags;
+    uint32_t access;
+    uint8_t  label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_EccKeyGenRequest;
+
+/* ECC Key Generation Response */
+typedef struct {
+    uint32_t keyId;
+    uint32_t len;
+    /* Data follows:
+     * uint8_t out[len];
+     */
+} whMessageCrypto_EccKeyGenResponse;
+
+int wh_MessageCrypto_TranslateEccKeyGenRequest(
+    uint16_t magic, const whMessageCrypto_EccKeyGenRequest* src,
+    whMessageCrypto_EccKeyGenRequest* dest);
+
+int wh_MessageCrypto_TranslateEccKeyGenResponse(
+    uint16_t magic, const whMessageCrypto_EccKeyGenResponse* src,
+    whMessageCrypto_EccKeyGenResponse* dest);
+
+/* ECDH Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_ECDH_OPTIONS_EVICTPUB (1 << 0)
+#define WH_MESSAGE_CRYPTO_ECDH_OPTIONS_EVICTPRV (1 << 1)
+    uint32_t privateKeyId;
+    uint32_t publicKeyId;
+    uint32_t flags; /* whNvmFlags. EPHEMERAL -> return secret to client.
+                       Otherwise cache on server. */
+    uint32_t keyId; /* Requested cache slot, or WH_KEYID_ERASED to
+                       have the server allocate one. Only used on the
+                       cache path. */
+    uint8_t label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_EcdhRequest;
+
+/* ECDH Response */
+typedef struct {
+    uint32_t sz;    /* >0: secret bytes follow.  0: secret was cached. */
+    uint32_t keyId; /* Assigned cache id when sz==0; 0 otherwise. */
+    /* Data follows when sz > 0:
+     * uint8_t out[sz];
+     */
+} whMessageCrypto_EcdhResponse;
+
+int wh_MessageCrypto_TranslateEcdhRequest(
+    uint16_t magic, const whMessageCrypto_EcdhRequest* src,
+    whMessageCrypto_EcdhRequest* dest);
+
+int wh_MessageCrypto_TranslateEcdhResponse(
+    uint16_t magic, const whMessageCrypto_EcdhResponse* src,
+    whMessageCrypto_EcdhResponse* dest);
+
+/* ECC Sign Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_ECCSIGN_OPTIONS_EVICT (1 << 0)
+    uint32_t keyId;
+    uint32_t sz;
+    /* Data follows:
+     * uint8_t in[sz];
+     */
+} whMessageCrypto_EccSignRequest;
+
+/* ECC Sign Response */
+typedef struct {
+    uint32_t sz;
+    /* Data follows:
+     * uint8_t out[sz];
+     */
+} whMessageCrypto_EccSignResponse;
+
+int wh_MessageCrypto_TranslateEccSignRequest(
+    uint16_t magic, const whMessageCrypto_EccSignRequest* src,
+    whMessageCrypto_EccSignRequest* dest);
+
+int wh_MessageCrypto_TranslateEccSignResponse(
+    uint16_t magic, const whMessageCrypto_EccSignResponse* src,
+    whMessageCrypto_EccSignResponse* dest);
+
+/* ECC Verify Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_ECCVERIFY_OPTIONS_EVICT (1 << 0)
+#define WH_MESSAGE_CRYPTO_ECCVERIFY_OPTIONS_EXPORTPUB (1 << 1)
+    uint32_t keyId;
+    uint32_t sigSz;
+    uint32_t hashSz;
+    /* Data follows:
+     * uint8_t sig[sigSz];
+     * uint8_t hash[hashSz];
+     */
+} whMessageCrypto_EccVerifyRequest;
+
+/* ECC Verify Response */
+typedef struct {
+    uint32_t res;
+    uint32_t pubSz;
+    /* Data follows:
+     * uint8_t pub[pubSz];
+     */
+} whMessageCrypto_EccVerifyResponse;
+
+int wh_MessageCrypto_TranslateEccVerifyRequest(
+    uint16_t magic, const whMessageCrypto_EccVerifyRequest* src,
+    whMessageCrypto_EccVerifyRequest* dest);
+
+int wh_MessageCrypto_TranslateEccVerifyResponse(
+    uint16_t magic, const whMessageCrypto_EccVerifyResponse* src,
+    whMessageCrypto_EccVerifyResponse* dest);
+
+/* ECC Check Request */
+typedef struct {
+    uint32_t keyId;
+    uint32_t curveId;
+} whMessageCrypto_EccCheckRequest;
+
+/* ECC Check Response */
+typedef struct {
+    uint32_t ok;
+} whMessageCrypto_EccCheckResponse;
+
+int wh_MessageCrypto_TranslateEccCheckRequest(
+    uint16_t magic, const whMessageCrypto_EccCheckRequest* src,
+    whMessageCrypto_EccCheckRequest* dest);
+
+int wh_MessageCrypto_TranslateEccCheckResponse(
+    uint16_t magic, const whMessageCrypto_EccCheckResponse* src,
+    whMessageCrypto_EccCheckResponse* dest);
+
+
+/*
+ * Curve25519
+ */
+
+/* Curve25519 Key Generation Request */
+typedef struct {
+    uint32_t sz;
+    uint32_t flags;
+    uint32_t keyId;
+    uint8_t  label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_Curve25519KeyGenRequest;
+
+/* Curve25519 Key Generation Response */
+typedef struct {
+    uint32_t keyId;
+    uint32_t len;
+    /* Data follows:
+     * uint8_t out[len];
+     */
+} whMessageCrypto_Curve25519KeyGenResponse;
+
+int wh_MessageCrypto_TranslateCurve25519KeyGenRequest(
+    uint16_t magic, const whMessageCrypto_Curve25519KeyGenRequest* src,
+    whMessageCrypto_Curve25519KeyGenRequest* dest);
+
+int wh_MessageCrypto_TranslateCurve25519KeyGenResponse(
+    uint16_t magic, const whMessageCrypto_Curve25519KeyGenResponse* src,
+    whMessageCrypto_Curve25519KeyGenResponse* dest);
+
+/* Curve25519 Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_CURVE25519_OPTIONS_EVICTPUB (1 << 0)
+#define WH_MESSAGE_CRYPTO_CURVE25519_OPTIONS_EVICTPRV (1 << 1)
+    uint32_t privateKeyId;
+    uint32_t publicKeyId;
+    uint32_t endian;
+    uint32_t flags; /* whNvmFlags. EPHEMERAL -> return secret to client.
+                       Otherwise cache on server. */
+    uint32_t keyId; /* Requested cache slot, or WH_KEYID_ERASED. */
+    uint8_t  label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_Curve25519Request;
+
+/* Curve25519 Response */
+typedef struct {
+    uint32_t sz;    /* >0: secret bytes follow.  0: secret was cached. */
+    uint32_t keyId; /* Assigned cache id when sz==0; 0 otherwise. */
+    /* Data follows when sz > 0:
+     * uint8_t out[sz];
+     */
+} whMessageCrypto_Curve25519Response;
+
+int wh_MessageCrypto_TranslateCurve25519Request(
+    uint16_t magic, const whMessageCrypto_Curve25519Request* src,
+    whMessageCrypto_Curve25519Request* dest);
+
+int wh_MessageCrypto_TranslateCurve25519Response(
+    uint16_t magic, const whMessageCrypto_Curve25519Response* src,
+    whMessageCrypto_Curve25519Response* dest);
+
+/*
+ * Ed25519
+ */
+
+/* Ed25519 Key Generation Request */
+typedef struct {
+    uint32_t flags;
+    uint32_t keyId;
+    uint32_t access;
+    uint8_t  label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_Ed25519KeyGenRequest;
+
+/* Ed25519 Key Generation Response */
+typedef struct {
+    uint32_t keyId;
+    uint32_t outSz;
+    /* Data follows:
+     * uint8_t out[outSz];
+     */
+} whMessageCrypto_Ed25519KeyGenResponse;
+
+int wh_MessageCrypto_TranslateEd25519KeyGenRequest(
+    uint16_t magic, const whMessageCrypto_Ed25519KeyGenRequest* src,
+    whMessageCrypto_Ed25519KeyGenRequest* dest);
+
+int wh_MessageCrypto_TranslateEd25519KeyGenResponse(
+    uint16_t magic, const whMessageCrypto_Ed25519KeyGenResponse* src,
+    whMessageCrypto_Ed25519KeyGenResponse* dest);
+
+/* Ed25519 Sign Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_ED25519_SIGN_OPTIONS_EVICT (1 << 0)
+    uint32_t keyId;
+    uint32_t msgSz;
+    uint32_t type;  /* wolfCrypt Ed25519 mode */
+    uint32_t ctxSz; /* Optional context length */
+    /* Data follows:
+     * uint8_t msg[msgSz];
+     * uint8_t ctx[ctxSz];
+     */
+} whMessageCrypto_Ed25519SignRequest;
+
+/* Ed25519 Sign Response */
+typedef struct {
+    uint32_t sigSz;
+    /* Data follows:
+     * uint8_t sig[sigSz];
+     */
+} whMessageCrypto_Ed25519SignResponse;
+
+int wh_MessageCrypto_TranslateEd25519SignRequest(
+    uint16_t magic, const whMessageCrypto_Ed25519SignRequest* src,
+    whMessageCrypto_Ed25519SignRequest* dest);
+
+int wh_MessageCrypto_TranslateEd25519SignResponse(
+    uint16_t magic, const whMessageCrypto_Ed25519SignResponse* src,
+    whMessageCrypto_Ed25519SignResponse* dest);
+
+/* Ed25519 Verify Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_ED25519_VERIFY_OPTIONS_EVICT (1 << 0)
+    uint32_t keyId;
+    uint32_t sigSz;
+    uint32_t msgSz;
+    uint32_t type;  /* wolfCrypt Ed25519 mode */
+    uint32_t ctxSz; /* Optional context length */
+    /* Data follows:
+     * uint8_t sig[sigSz];
+     * uint8_t msg[msgSz];
+     * uint8_t ctx[ctxSz];
+     */
+} whMessageCrypto_Ed25519VerifyRequest;
+
+/* Ed25519 Verify Response */
+typedef struct {
+    int32_t res;
+} whMessageCrypto_Ed25519VerifyResponse;
+
+int wh_MessageCrypto_TranslateEd25519VerifyRequest(
+    uint16_t magic, const whMessageCrypto_Ed25519VerifyRequest* src,
+    whMessageCrypto_Ed25519VerifyRequest* dest);
+
+int wh_MessageCrypto_TranslateEd25519VerifyResponse(
+    uint16_t magic, const whMessageCrypto_Ed25519VerifyResponse* src,
+    whMessageCrypto_Ed25519VerifyResponse* dest);
+
+/*
+ * SHA
+ */
+
+/* SHA256/SHA224 Request (variable-length input data follows the struct).
+ *
+ * Wire layout in the comm buffer:
+ *   whMessageCrypto_GenericRequestHeader
+ *   whMessageCrypto_Sha256Request
+ *   uint8_t in[inSz]
+ *
+ * Non-final updates: inSz must be a multiple of WC_SHA256_BLOCK_SIZE (or
+ * WC_SHA224_BLOCK_SIZE for SHA224, which is the same value).
+ * Final: 0..(BLOCK_SIZE - 1). The client buffers any partial-block tail
+ * locally and only sends the final tail with isLastBlock=1.
+ */
+typedef struct {
+    struct {
+        uint32_t hiLen;
+        uint32_t loLen;
+        /* intermediate hash value */
+        uint8_t hash[32]; /* WC_SHA256_DIGEST_SIZE */
+    } resumeState;
+    /* 1 = last block; server finalizes after consuming inSz bytes.
+     * 0 = non-final update; inSz MUST be a multiple of the block size. */
+    uint32_t isLastBlock;
+    /* Number of input bytes trailing this struct. */
+    uint32_t inSz;
+} whMessageCrypto_Sha256Request;
+
+/* Maximum number of input bytes that can be carried inline (after the generic
+ * crypto request header and the Sha256Request struct) in a single comm-buffer
+ * message, rounded down to a multiple of WC_SHA256_BLOCK_SIZE so non-final
+ * updates always carry whole blocks. */
+#define WH_MESSAGE_CRYPTO_SHA256_MAX_INLINE_UPDATE_SZ           \
+    (((WOLFHSM_CFG_COMM_DATA_LEN -                              \
+       (uint32_t)sizeof(whMessageCrypto_GenericRequestHeader) - \
+       (uint32_t)sizeof(whMessageCrypto_Sha256Request)) /       \
+      64u) *                                                    \
+     64u)
+
+WH_UTILS_STATIC_ASSERT(WH_MESSAGE_CRYPTO_SHA256_MAX_INLINE_UPDATE_SZ >= 64u,
+                       "Comm buffer too small to fit a SHA256 block");
+
+/* SHA224 shares the SHA256 wire format and block size (64), so the same
+ * per-call inline capacity applies. Exposed as a separate macro so SHA224
+ * call sites stay self-documenting. */
+#define WH_MESSAGE_CRYPTO_SHA224_MAX_INLINE_UPDATE_SZ \
+    WH_MESSAGE_CRYPTO_SHA256_MAX_INLINE_UPDATE_SZ
+
+int wh_MessageCrypto_TranslateSha256Request(
+    uint16_t magic, const whMessageCrypto_Sha256Request* src,
+    whMessageCrypto_Sha256Request* dest);
+
+
+/* SHA512/SHA384 Request (variable-length input data follows the struct).
+ *
+ * Wire layout in the comm buffer:
+ *   whMessageCrypto_GenericRequestHeader
+ *   whMessageCrypto_Sha512Request
+ *   uint8_t in[inSz]
+ *
+ * Non-final updates: inSz must be a multiple of WC_SHA512_BLOCK_SIZE (or
+ * WC_SHA384_BLOCK_SIZE for SHA384, which is the same value).
+ * Final: 0..(BLOCK_SIZE - 1). The client buffers any partial-block tail
+ * locally and only sends the final tail with isLastBlock=1.
+ */
+typedef struct {
+    struct {
+        uint32_t hiLen;
+        uint32_t loLen;
+        /* intermediate hash value */
+        uint8_t  hash[64]; /* WC_SHA512_DIGEST_SIZE */
+        uint32_t hashType;
+    } resumeState;
+    /* 1 = last block; server finalizes after consuming inSz bytes.
+     * 0 = non-final update; inSz MUST be a multiple of the block size. */
+    uint32_t isLastBlock;
+    /* Number of input bytes trailing this struct. */
+    uint32_t inSz;
+} whMessageCrypto_Sha512Request;
+
+/* Maximum number of input bytes that can be carried inline (after the generic
+ * crypto request header and the Sha512Request struct) in a single comm-buffer
+ * message, rounded down to a multiple of WC_SHA512_BLOCK_SIZE so non-final
+ * updates always carry whole blocks. */
+#define WH_MESSAGE_CRYPTO_SHA512_MAX_INLINE_UPDATE_SZ           \
+    (((WOLFHSM_CFG_COMM_DATA_LEN -                              \
+       (uint32_t)sizeof(whMessageCrypto_GenericRequestHeader) - \
+       (uint32_t)sizeof(whMessageCrypto_Sha512Request)) /       \
+      128u) *                                                   \
+     128u)
+
+WH_UTILS_STATIC_ASSERT(WH_MESSAGE_CRYPTO_SHA512_MAX_INLINE_UPDATE_SZ >= 128u,
+                       "Comm buffer too small to fit a SHA512 block");
+
+/* SHA384 shares the SHA512 wire format and block size (128), so the same
+ * per-call inline capacity applies. Exposed as a separate macro so SHA384
+ * call sites stay self-documenting. */
+#define WH_MESSAGE_CRYPTO_SHA384_MAX_INLINE_UPDATE_SZ \
+    WH_MESSAGE_CRYPTO_SHA512_MAX_INLINE_UPDATE_SZ
+
+/* SHA2 Response */
+typedef struct {
+    /* Resulting hash value */
+    uint32_t hiLen;
+    uint32_t loLen;
+    uint8_t  hash[64]; /* TODO WC_SHA512_DIGEST_SIZE */
+    uint32_t hashType;
+} whMessageCrypto_Sha2Response;
+
+int wh_MessageCrypto_TranslateSha512Request(
+    uint16_t magic, const whMessageCrypto_Sha512Request* src,
+    whMessageCrypto_Sha512Request* dest);
+
+int wh_MessageCrypto_TranslateSha2Response(
+    uint16_t magic, const whMessageCrypto_Sha2Response* src,
+    whMessageCrypto_Sha2Response* dest);
+
+/*
+ * CMAC (AES)
+ */
+
+/* CMAC-AES intermediate state - non-sensitive fields only.
+ * k1/k2 subkeys are NOT included as they are key-derived material.
+ * Server re-derives them via wc_InitCmac_ex on each request. */
+typedef struct {
+    uint8_t  buffer[16]; /* AES_BLOCK_SIZE: partial block buffer */
+    uint8_t  digest[16]; /* AES_BLOCK_SIZE: running CBC-MAC digest */
+    uint32_t bufferSz;   /* bytes in partial block buffer */
+    uint32_t totalSz;    /* total bytes processed */
+} whMessageCrypto_CmacAesState;
+
+/* CMAC-AES Request */
+typedef struct {
+    uint32_t outSz; /* output MAC size (0 if not finalizing) */
+    uint32_t inSz;  /* input data size */
+    uint32_t keySz; /* key size (0 if using keyId or already initialized) */
+    uint16_t keyId; /* key ID for HSM-stored key */
+    uint8_t  WH_PAD[2];
+    whMessageCrypto_CmacAesState resumeState;
+    /* Data follows:
+     * uint8_t in[inSz]
+     * uint8_t key[keySz]
+     */
+} whMessageCrypto_CmacAesRequest;
+
+/* CMAC-AES Response */
+typedef struct {
+    whMessageCrypto_CmacAesState resumeState;
+    uint32_t                     outSz; /* actual output MAC size */
+    uint16_t                     keyId; /* key ID (ERASED for non-HSM) */
+    uint8_t                      WH_PAD[2];
+    /* Data follows:
+     * uint8_t out[outSz]
+     */
+} whMessageCrypto_CmacAesResponse;
+
+/* Maximum number of input bytes that wh_Client_CmacGenerateRequest can carry
+ * inline in one message. Oneshot CMAC accepts arbitrary input length, so
+ * this is NOT block-aligned. Conservatively reserves AES_256_KEY_SIZE (32)
+ * bytes for the key. */
+#define WH_MESSAGE_CRYPTO_CMAC_MAX_INLINE_GENERATE_SZ         \
+    (WOLFHSM_CFG_COMM_DATA_LEN -                              \
+     (uint32_t)sizeof(whMessageCrypto_GenericRequestHeader) - \
+     (uint32_t)sizeof(whMessageCrypto_CmacAesRequest) - 32u)
+
+int wh_MessageCrypto_TranslateCmacAesState(
+    uint16_t magic, const whMessageCrypto_CmacAesState* src,
+    whMessageCrypto_CmacAesState* dest);
+
+int wh_MessageCrypto_TranslateCmacAesRequest(
+    uint16_t magic, const whMessageCrypto_CmacAesRequest* src,
+    whMessageCrypto_CmacAesRequest* dest);
+
+int wh_MessageCrypto_TranslateCmacAesResponse(
+    uint16_t magic, const whMessageCrypto_CmacAesResponse* src,
+    whMessageCrypto_CmacAesResponse* dest);
+
+
+/*
+ * ML-DSA
+ */
+
+/* ML-DSA Key Generation Request */
+typedef struct {
+    uint32_t sz;
+    uint32_t level;
+    uint32_t keyId;
+    uint32_t flags;
+    uint32_t access;
+    uint8_t  label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_MlDsaKeyGenRequest;
+
+/* ML-DSA Key Generation Response */
+typedef struct {
+    uint32_t keyId;
+    uint32_t len;
+    /* Data follows:
+     * uint8_t out[len];
+     */
+} whMessageCrypto_MlDsaKeyGenResponse;
+
+int wh_MessageCrypto_TranslateMlDsaKeyGenRequest(
+    uint16_t magic, const whMessageCrypto_MlDsaKeyGenRequest* src,
+    whMessageCrypto_MlDsaKeyGenRequest* dest);
+
+int wh_MessageCrypto_TranslateMlDsaKeyGenResponse(
+    uint16_t magic, const whMessageCrypto_MlDsaKeyGenResponse* src,
+    whMessageCrypto_MlDsaKeyGenResponse* dest);
+
+/* ML-DSA Sign Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_MLDSA_SIGN_OPTIONS_EVICT (1 << 0)
+    uint32_t level;
+    uint32_t keyId;
+    uint32_t sz;
+    uint32_t contextSz;   /* FIPS 204 context length (0-255) */
+    uint32_t preHashType;  /* enum wc_HashType, 0 for pure ML-DSA */
+    /* Data follows:
+     * uint8_t in[sz];
+     * uint8_t context[contextSz];
+     */
+} whMessageCrypto_MlDsaSignRequest;
+
+/* ML-DSA Sign Response */
+typedef struct {
+    uint32_t sz;
+    uint8_t  WH_PAD[4];
+    /* Data follows:
+     * uint8_t out[sz];
+     */
+} whMessageCrypto_MlDsaSignResponse;
+
+int wh_MessageCrypto_TranslateMlDsaSignRequest(
+    uint16_t magic, const whMessageCrypto_MlDsaSignRequest* src,
+    whMessageCrypto_MlDsaSignRequest* dest);
+
+int wh_MessageCrypto_TranslateMlDsaSignResponse(
+    uint16_t magic, const whMessageCrypto_MlDsaSignResponse* src,
+    whMessageCrypto_MlDsaSignResponse* dest);
+
+/* ML-DSA Verify Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_MLDSA_VERIFY_OPTIONS_EVICT (1 << 0)
+#define WH_MESSAGE_CRYPTO_MLDSA_VERIFY_OPTIONS_EXPORTPUB (1 << 1)
+    uint32_t level;
+    uint32_t keyId;
+    uint32_t sigSz;
+    uint32_t hashSz;
+    uint32_t contextSz;   /* FIPS 204 context length (0-255) */
+    uint32_t preHashType;  /* enum wc_HashType, 0 for pure ML-DSA */
+    uint8_t  WH_PAD[4];
+    /* Data follows:
+     * uint8_t sig[sigSz];
+     * uint8_t hash[hashSz];
+     * uint8_t context[contextSz];
+     */
+} whMessageCrypto_MlDsaVerifyRequest;
+
+/* ML-DSA Verify Response */
+typedef struct {
+    uint32_t res;
+    uint8_t  WH_PAD[4];
+} whMessageCrypto_MlDsaVerifyResponse;
+
+int wh_MessageCrypto_TranslateMlDsaVerifyRequest(
+    uint16_t magic, const whMessageCrypto_MlDsaVerifyRequest* src,
+    whMessageCrypto_MlDsaVerifyRequest* dest);
+
+int wh_MessageCrypto_TranslateMlDsaVerifyResponse(
+    uint16_t magic, const whMessageCrypto_MlDsaVerifyResponse* src,
+    whMessageCrypto_MlDsaVerifyResponse* dest);
+
+/*
+ * ML-KEM
+ */
+
+/* ML-KEM Key Generation Request */
+typedef struct {
+    uint32_t level;
+    uint32_t keyId;
+    uint32_t flags;
+    uint32_t access;
+    uint8_t  label[WH_NVM_LABEL_LEN];
+} whMessageCrypto_MlKemKeyGenRequest;
+
+/* ML-KEM Key Generation Response */
+typedef struct {
+    uint32_t keyId;
+    uint32_t len;
+    /* Data follows:
+     * uint8_t out[len];
+     */
+} whMessageCrypto_MlKemKeyGenResponse;
+
+int wh_MessageCrypto_TranslateMlKemKeyGenRequest(
+    uint16_t magic, const whMessageCrypto_MlKemKeyGenRequest* src,
+    whMessageCrypto_MlKemKeyGenRequest* dest);
+
+int wh_MessageCrypto_TranslateMlKemKeyGenResponse(
+    uint16_t magic, const whMessageCrypto_MlKemKeyGenResponse* src,
+    whMessageCrypto_MlKemKeyGenResponse* dest);
+
+/* ML-KEM Encapsulation Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_MLKEM_ENCAPS_OPTIONS_EVICT (1 << 0)
+    uint32_t level;
+    uint32_t keyId;
+    uint8_t  WH_PAD[4];
+} whMessageCrypto_MlKemEncapsRequest;
+
+/* ML-KEM Encapsulation Response */
+typedef struct {
+    uint32_t ctSz;
+    uint32_t ssSz;
+    /* Data follows:
+     * uint8_t ct[ctSz];
+     * uint8_t ss[ssSz];
+     */
+} whMessageCrypto_MlKemEncapsResponse;
+
+int wh_MessageCrypto_TranslateMlKemEncapsRequest(
+    uint16_t magic, const whMessageCrypto_MlKemEncapsRequest* src,
+    whMessageCrypto_MlKemEncapsRequest* dest);
+
+int wh_MessageCrypto_TranslateMlKemEncapsResponse(
+    uint16_t magic, const whMessageCrypto_MlKemEncapsResponse* src,
+    whMessageCrypto_MlKemEncapsResponse* dest);
+
+/* ML-KEM Decapsulation Request */
+typedef struct {
+    uint32_t options;
+#define WH_MESSAGE_CRYPTO_MLKEM_DECAPS_OPTIONS_EVICT (1 << 0)
+    uint32_t level;
+    uint32_t keyId;
+    uint32_t ctSz;
+    /* Data follows:
+     * uint8_t ct[ctSz];
+     */
+} whMessageCrypto_MlKemDecapsRequest;
+
+/* ML-KEM Decapsulation Response */
+typedef struct {
+    uint32_t ssSz;
+    uint8_t  WH_PAD[4];
+    /* Data follows:
+     * uint8_t ss[ssSz];
+     */
+} whMessageCrypto_MlKemDecapsResponse;
+
+int wh_MessageCrypto_TranslateMlKemDecapsRequest(
+    uint16_t magic, const whMessageCrypto_MlKemDecapsRequest* src,
+    whMessageCrypto_MlKemDecapsRequest* dest);
+
+int wh_MessageCrypto_TranslateMlKemDecapsResponse(
+    uint16_t magic, const whMessageCrypto_MlKemDecapsResponse* src,
+    whMessageCrypto_MlKemDecapsResponse* dest);
+
+
+/*
+ * DMA-based crypto messages
+ */
+
+/* DMA buffer structure */
+typedef struct {
+    uint64_t addr;
+    uint64_t sz;
+} whMessageCrypto_DmaBuffer;
+
+/* DMA address status structure */
+typedef struct {
+    /* If packet->rc == WH_ERROR_ACCESS, this field will contain the offending
+     * address/size pair. Invalid otherwise. */
+    whMessageCrypto_DmaBuffer badAddr;
+} whMessageCrypto_DmaAddrStatus;
+
+
+/* SHA256/SHA224 DMA Request - state is passed inline (not via DMA) for
+ * cross-architecture safety. Only input data goes via DMA.
+ *
+ * Wire layout in the comm buffer:
+ *   whMessageCrypto_GenericRequestHeader
+ *   whMessageCrypto_Sha256DmaRequest
+ *   uint8_t in[inSz]   (inline trailing data: assembled first block from
+ *                        partial buffer, or partial tail on Final)
+ *
+ * Non-final: DMA input must be whole blocks. inSz is 0 or BLOCK_SIZE
+ *   (assembled first block from client partial-block buffer).
+ * Final: inSz = buffLen (0..BLOCK_SIZE-1), no DMA input. */
+typedef struct {
+    struct {
+        uint32_t hiLen;
+        uint32_t loLen;
+        uint8_t  hash[32]; /* WC_SHA256_DIGEST_SIZE */
+    } resumeState;
+    whMessageCrypto_DmaBuffer input; /* DMA whole blocks (Update only) */
+    uint32_t                  isLastBlock;
+    uint32_t                  inSz; /* inline trailing data size */
+} whMessageCrypto_Sha256DmaRequest;
+
+/* SHA512/SHA384 DMA Request */
+typedef struct {
+    struct {
+        uint32_t hiLen;
+        uint32_t loLen;
+        uint8_t  hash[64]; /* WC_SHA512_DIGEST_SIZE */
+        uint32_t hashType;
+        uint8_t  WH_PAD[4];
+    } resumeState;
+    whMessageCrypto_DmaBuffer input;
+    uint32_t                  isLastBlock;
+    uint32_t                  inSz;
+} whMessageCrypto_Sha512DmaRequest;
+
+/* SHA2 DMA Response - carries updated state or final hash inline.
+ * Fields ordered by size (8-byte-aligned struct first) to keep padding
+ * trailing. */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus
+             dmaAddrStatus; /* 8-byte aligned, place first */
+    uint8_t  hash[64];      /* big enough for all SHA2 variants */
+    uint32_t hiLen;
+    uint32_t loLen;
+    uint32_t hashType;
+    uint8_t  WH_PAD[4];
+} whMessageCrypto_Sha2DmaResponse;
+
+/* SHA2 DMA translation functions */
+int wh_MessageCrypto_TranslateSha256DmaRequest(
+    uint16_t magic, const whMessageCrypto_Sha256DmaRequest* src,
+    whMessageCrypto_Sha256DmaRequest* dest);
+
+int wh_MessageCrypto_TranslateSha512DmaRequest(
+    uint16_t magic, const whMessageCrypto_Sha512DmaRequest* src,
+    whMessageCrypto_Sha512DmaRequest* dest);
+
+int wh_MessageCrypto_TranslateSha2DmaResponse(
+    uint16_t magic, const whMessageCrypto_Sha2DmaResponse* src,
+    whMessageCrypto_Sha2DmaResponse* dest);
+
+/* CMAC-AES DMA Request - state, key, and output are passed inline in the
+ * message for cross-architecture safety. Input may be carried via DMA
+ * (input.sz bytes, whole-block aligned) AND/OR inline (inlineInSz bytes) —
+ * when both are present the inline portion is logically processed BEFORE the
+ * DMA portion. The assembled first block from the client's partial-block
+ * buffer goes inline; the bulk of whole-block input goes via DMA. On Final
+ * the tail (0..AES_BLOCK_SIZE-1 bytes) goes inline with input.sz = 0.
+ *
+ * Wire layout in the comm buffer:
+ *   whMessageCrypto_GenericRequestHeader
+ *   whMessageCrypto_CmacAesDmaRequest
+ *   uint8_t in[inlineInSz]
+ *   uint8_t key[keySz]
+ */
+typedef struct {
+    whMessageCrypto_CmacAesState resumeState; /* portable CMAC state */
+    whMessageCrypto_DmaBuffer    input;       /* Whole-block DMA input */
+    uint32_t outSz;      /* output MAC size (0 = not finalizing) */
+    uint32_t keySz;      /* inline key size (0 = use keyId) */
+    uint32_t inlineInSz; /* inline trailing input size (assembled first
+                          * block on Update, partial tail on Final, 0 on
+                          * oneshot Generate) */
+    uint16_t keyId;      /* HSM key ID */
+    uint8_t  WH_PAD[2];
+    /* Trailing data: uint8_t in[inlineInSz]; uint8_t key[keySz]; */
+} whMessageCrypto_CmacAesDmaRequest;
+
+/* CMAC-AES DMA Response - state and output MAC returned inline */
+typedef struct {
+    whMessageCrypto_CmacAesState  resumeState; /* portable CMAC state */
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      outSz; /* actual output MAC size */
+    uint16_t                      keyId;
+    uint8_t                       WH_PAD[2];
+    /* Trailing data: uint8_t out[outSz] (max AES_BLOCK_SIZE = 16 bytes) */
+} whMessageCrypto_CmacAesDmaResponse;
+
+/* CMAC-AES DMA translation functions */
+int wh_MessageCrypto_TranslateCmacAesDmaRequest(
+    uint16_t magic, const whMessageCrypto_CmacAesDmaRequest* src,
+    whMessageCrypto_CmacAesDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateCmacAesDmaResponse(
+    uint16_t magic, const whMessageCrypto_CmacAesDmaResponse* src,
+    whMessageCrypto_CmacAesDmaResponse* dest);
+
+/* AES-ECB DMA Request - only input and output data go via DMA. Key is
+ * passed inline. */
+typedef struct {
+    whMessageCrypto_DmaBuffer input;     /* Input buffer */
+    whMessageCrypto_DmaBuffer output;    /* Output buffer */
+    uint32_t                  enc;       /* 1 for encrypt, 0 for decrypt */
+    uint32_t                  keyId;
+    uint32_t                  keySz;     /* inline key size (0 = use keyId) */
+    uint8_t                   WH_PAD[4]; /* Pad to 8-byte alignment */
+    /* Trailing data: uint8_t key[keySz] */
+} whMessageCrypto_AesEcbDmaRequest;
+
+/* AES-ECB DMA Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      outSz;
+    uint8_t WH_PAD[4]; /* Round struct to 8-byte alignment */
+} whMessageCrypto_AesEcbDmaResponse;
+
+/* AES-ECB DMA translation functions */
+int wh_MessageCrypto_TranslateAesEcbDmaRequest(
+    uint16_t magic, const whMessageCrypto_AesEcbDmaRequest* src,
+    whMessageCrypto_AesEcbDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateAesEcbDmaResponse(
+    uint16_t magic, const whMessageCrypto_AesEcbDmaResponse* src,
+    whMessageCrypto_AesEcbDmaResponse* dest);
+
+/* AES-CBC DMA Request - only input and output data go via DMA. Key and IV
+ * are passed inline. */
+typedef struct {
+    whMessageCrypto_DmaBuffer input;    /* Input buffer */
+    whMessageCrypto_DmaBuffer output;   /* Output buffer */
+    uint32_t                  enc;      /* 1 for encrypt, 0 for decrypt */
+    uint32_t                  keyId;
+    uint32_t                  keySz;    /* inline key size (0 = use keyId) */
+    uint8_t                   WH_PAD[4]; /* Pad to 8-byte alignment */
+    /* Trailing data:
+     *     uint8_t iv[AES_IV_SIZE]
+     *     uint8_t key[keySz]
+     */
+} whMessageCrypto_AesCbcDmaRequest;
+
+/* AES-CBC DMA Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      outSz;
+    uint8_t WH_PAD[4]; /* Round struct to 8-byte alignment */
+    /* Trailing data: uint8_t iv[AES_IV_SIZE] */
+} whMessageCrypto_AesCbcDmaResponse;
+
+/* AES-CBC DMA translation functions */
+int wh_MessageCrypto_TranslateAesCbcDmaRequest(
+    uint16_t magic, const whMessageCrypto_AesCbcDmaRequest* src,
+    whMessageCrypto_AesCbcDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateAesCbcDmaResponse(
+    uint16_t magic, const whMessageCrypto_AesCbcDmaResponse* src,
+    whMessageCrypto_AesCbcDmaResponse* dest);
+
+/* AES-CTR DMA Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer input;    /* Input buffer */
+    whMessageCrypto_DmaBuffer output;   /* Output buffer */
+    uint32_t                  enc;      /* 1 for encrypt, 0 for decrypt */
+    uint32_t                  left;     /* unused bytes left from last call */
+    uint32_t                  keyId;
+    uint32_t                  keySz;    /* inline key size (0 = use keyId) */
+    /* Trailing data:
+     *     uint8_t iv[AES_IV_SIZE]
+     *     uint8_t tmp[AES_BLOCK_SIZE]
+     *     uint8_t key[keySz]
+     */
+} whMessageCrypto_AesCtrDmaRequest;
+
+/* AES-CTR DMA Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      outSz;
+    uint32_t                      left;     /* unused bytes left from last call */
+    /* Trailing data:
+     *    uint8_t iv[AES_IV_SIZE]
+     *    uint8_t tmp[AES_BLOCK_SIZE] */
+} whMessageCrypto_AesCtrDmaResponse;
+
+/* AES-CTR DMA translation functions */
+int wh_MessageCrypto_TranslateAesCtrDmaRequest(
+    uint16_t magic, const whMessageCrypto_AesCtrDmaRequest* src,
+    whMessageCrypto_AesCtrDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateAesCtrDmaResponse(
+    uint16_t magic, const whMessageCrypto_AesCtrDmaResponse* src,
+    whMessageCrypto_AesCtrDmaResponse* dest);
+
+/* AES-GCM DMA Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer input;     /* Input buffer */
+    whMessageCrypto_DmaBuffer output;    /* Output buffer */
+    whMessageCrypto_DmaBuffer aad;       /* AAD buffer */
+    uint32_t                  enc;       /* 1 for encrypt, 0 for decrypt */
+    uint32_t                  keyId;
+    uint32_t                  keySz;     /* inline key size (0 = use keyId) */
+    uint32_t                  ivSz;      /* Size of IV */
+    uint32_t                  authTagSz; /* Size of auth tag */
+    uint8_t                   WH_PAD[4]; /* Pad to 8-byte alignment */
+    /* Trailing data:
+     *     uint8_t iv[ivSz]
+     *     uint8_t authTag[authTagSz]
+     *     uint8_t key[keySz]
+     */
+} whMessageCrypto_AesGcmDmaRequest;
+
+/* AES-GCM DMA Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      outSz;
+    uint32_t                      authTagSz; /* Size of auth tag */
+    /* Trailing data: uint8_t authTag[authTagSz] */
+} whMessageCrypto_AesGcmDmaResponse;
+
+/* AES-GCM DMA translation functions */
+int wh_MessageCrypto_TranslateAesGcmDmaRequest(
+    uint16_t magic, const whMessageCrypto_AesGcmDmaRequest* src,
+    whMessageCrypto_AesGcmDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateAesGcmDmaResponse(
+    uint16_t magic, const whMessageCrypto_AesGcmDmaResponse* src,
+    whMessageCrypto_AesGcmDmaResponse* dest);
+
+/* ML-DSA DMA Key Generation Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer key;
+    uint32_t                  level;
+    uint32_t                  flags;
+    uint32_t                  keyId;
+    uint32_t                  access; /* Key access permissions */
+    uint32_t                  labelSize;
+    uint8_t                   label[WH_NVM_LABEL_LEN];
+    uint8_t WH_PAD2[4]; /* Final padding for 8-byte alignment */
+} whMessageCrypto_MlDsaKeyGenDmaRequest;
+
+/* ML-DSA DMA Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      keyId;   /* Assigned key ID */
+    uint32_t                      keySize; /* Actual size of generated key */
+} whMessageCrypto_MlDsaKeyGenDmaResponse;
+
+/* ML-DSA DMA Sign Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer msg;         /* Message buffer */
+    whMessageCrypto_DmaBuffer sig;         /* Signature buffer */
+    uint32_t                  options;     /* Same options as non-DMA version */
+    uint32_t                  level;       /* ML-DSA security level */
+    uint32_t                  keyId;       /* Key ID to use for signing */
+    uint32_t                  contextSz;   /* FIPS 204 context length (0-255) */
+    uint32_t                  preHashType;  /* enum wc_HashType */
+    uint8_t                   WH_PAD[4];   /* Pad to 8-byte alignment */
+    /* Data follows:
+     * uint8_t context[contextSz];
+     */
+} whMessageCrypto_MlDsaSignDmaRequest;
+
+/* ML-DSA DMA Sign Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      sigLen;    /* Actual signature length */
+    uint8_t                       WH_PAD[4]; /* Pad to 8-byte alignment */
+} whMessageCrypto_MlDsaSignDmaResponse;
+
+/* ML-DSA DMA Verify Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer sig;         /* Signature buffer */
+    whMessageCrypto_DmaBuffer msg;         /* Message buffer */
+    uint32_t                  options;     /* Same options as non-DMA version */
+    uint32_t                  level;       /* ML-DSA security level */
+    uint32_t                  keyId;       /* Key ID to use for verification */
+    uint32_t                  contextSz;   /* FIPS 204 context length (0-255) */
+    uint32_t                  preHashType;  /* enum wc_HashType */
+    uint8_t                   WH_PAD[4];   /* Pad to 8-byte alignment */
+    /* Data follows:
+     * uint8_t context[contextSz];
+     */
+} whMessageCrypto_MlDsaVerifyDmaRequest;
+
+/* ML-DSA DMA Verify Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    int32_t                       verifyResult; /* Result of verification */
+    uint8_t                       WH_PAD[4];    /* Pad to 8-byte alignment */
+} whMessageCrypto_MlDsaVerifyDmaResponse;
+
+/* ML-DSA DMA translation functions */
+int wh_MessageCrypto_TranslateMlDsaKeyGenDmaRequest(
+    uint16_t magic, const whMessageCrypto_MlDsaKeyGenDmaRequest* src,
+    whMessageCrypto_MlDsaKeyGenDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateMlDsaKeyGenDmaResponse(
+    uint16_t magic, const whMessageCrypto_MlDsaKeyGenDmaResponse* src,
+    whMessageCrypto_MlDsaKeyGenDmaResponse* dest);
+
+int wh_MessageCrypto_TranslateMlDsaSignDmaRequest(
+    uint16_t magic, const whMessageCrypto_MlDsaSignDmaRequest* src,
+    whMessageCrypto_MlDsaSignDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateMlDsaSignDmaResponse(
+    uint16_t magic, const whMessageCrypto_MlDsaSignDmaResponse* src,
+    whMessageCrypto_MlDsaSignDmaResponse* dest);
+
+int wh_MessageCrypto_TranslateMlDsaVerifyDmaRequest(
+    uint16_t magic, const whMessageCrypto_MlDsaVerifyDmaRequest* src,
+    whMessageCrypto_MlDsaVerifyDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateMlDsaVerifyDmaResponse(
+    uint16_t magic, const whMessageCrypto_MlDsaVerifyDmaResponse* src,
+    whMessageCrypto_MlDsaVerifyDmaResponse* dest);
+
+/* ML-KEM DMA Key Generation Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer key;
+    uint32_t                  level;
+    uint32_t                  flags;
+    uint32_t                  keyId;
+    uint32_t                  access; /* Key access permissions */
+    uint32_t                  labelSize;
+    uint8_t                   label[WH_NVM_LABEL_LEN];
+    uint8_t                   WH_PAD2[4]; /* Pad to 8-byte alignment */
+} whMessageCrypto_MlKemKeyGenDmaRequest;
+
+/* ML-KEM DMA Key Generation Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      keyId;
+    uint32_t                      keySize;
+} whMessageCrypto_MlKemKeyGenDmaResponse;
+
+/* ML-KEM DMA Encapsulation Request
+ * Note: The shared secret is transferred inline in the response (not via DMA)
+ * since it is always WC_ML_KEM_SS_SZ (32) bytes, similar to AES key handling.
+ */
+typedef struct {
+    whMessageCrypto_DmaBuffer ct;
+    uint32_t                  options;
+    uint32_t                  level;
+    uint32_t                  keyId;
+    uint8_t                   WH_PAD[4]; /* Pad to 8-byte alignment */
+} whMessageCrypto_MlKemEncapsDmaRequest;
+
+/* ML-KEM DMA Encapsulation Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      ctLen;
+    uint32_t                      ssLen;
+    /* Data follows:
+     * uint8_t ss[ssLen];
+     */
+} whMessageCrypto_MlKemEncapsDmaResponse;
+
+/* ML-KEM DMA Decapsulation Request
+ * Note: The shared secret is transferred inline in the response (not via DMA).
+ */
+typedef struct {
+    whMessageCrypto_DmaBuffer ct;
+    uint32_t                  options;
+    uint32_t                  level;
+    uint32_t                  keyId;
+    uint8_t                   WH_PAD[4]; /* Pad to 8-byte alignment */
+} whMessageCrypto_MlKemDecapsDmaRequest;
+
+/* ML-KEM DMA Decapsulation Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      ssLen;
+    uint8_t                       WH_PAD[4]; /* Pad to 8-byte alignment */
+    /* Data follows:
+     * uint8_t ss[ssLen];
+     */
+} whMessageCrypto_MlKemDecapsDmaResponse;
+
+/* ML-KEM DMA translation functions */
+int wh_MessageCrypto_TranslateMlKemKeyGenDmaRequest(
+    uint16_t magic, const whMessageCrypto_MlKemKeyGenDmaRequest* src,
+    whMessageCrypto_MlKemKeyGenDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateMlKemKeyGenDmaResponse(
+    uint16_t magic, const whMessageCrypto_MlKemKeyGenDmaResponse* src,
+    whMessageCrypto_MlKemKeyGenDmaResponse* dest);
+
+int wh_MessageCrypto_TranslateMlKemEncapsDmaRequest(
+    uint16_t magic, const whMessageCrypto_MlKemEncapsDmaRequest* src,
+    whMessageCrypto_MlKemEncapsDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateMlKemEncapsDmaResponse(
+    uint16_t magic, const whMessageCrypto_MlKemEncapsDmaResponse* src,
+    whMessageCrypto_MlKemEncapsDmaResponse* dest);
+
+int wh_MessageCrypto_TranslateMlKemDecapsDmaRequest(
+    uint16_t magic, const whMessageCrypto_MlKemDecapsDmaRequest* src,
+    whMessageCrypto_MlKemDecapsDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateMlKemDecapsDmaResponse(
+    uint16_t magic, const whMessageCrypto_MlKemDecapsDmaResponse* src,
+    whMessageCrypto_MlKemDecapsDmaResponse* dest);
+
+/* Ed25519 DMA Sign Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer msg; /* Message buffer */
+    whMessageCrypto_DmaBuffer sig; /* Signature buffer */
+    whMessageCrypto_DmaBuffer pub; /* Signature buffer */
+    uint32_t                  options;
+    uint32_t                  keyId;
+    uint32_t                  type;      /* wolfCrypt Ed25519 mode */
+    uint32_t                  ctxSz;     /* Optional context length */
+    /* Data follows:
+     * uint8_t ctx[ctxSz];
+     */
+} whMessageCrypto_Ed25519SignDmaRequest;
+
+/* Ed25519 DMA Sign Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    uint32_t                      sigSz;
+    uint32_t                      pubSz;
+} whMessageCrypto_Ed25519SignDmaResponse;
+
+/* Ed25519 DMA Verify Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer sig; /* Signature buffer */
+    whMessageCrypto_DmaBuffer msg; /* Message buffer */
+    whMessageCrypto_DmaBuffer pub; /* Public key buffer if exported */
+    uint32_t                  options;
+    uint32_t                  keyId;
+    uint32_t                  type;      /* wolfCrypt Ed25519 mode */
+    uint32_t                  ctxSz;     /* Optional context length */
+    /* Data follows:
+     * uint8_t ctx[ctxSz];
+     */
+} whMessageCrypto_Ed25519VerifyDmaRequest;
+
+/* Ed25519 DMA Verify Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+    int32_t                       verifyResult;
+    uint32_t                      pubSz;
+} whMessageCrypto_Ed25519VerifyDmaResponse;
+
+int wh_MessageCrypto_TranslateEd25519SignDmaRequest(
+    uint16_t magic, const whMessageCrypto_Ed25519SignDmaRequest* src,
+    whMessageCrypto_Ed25519SignDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateEd25519SignDmaResponse(
+    uint16_t magic, const whMessageCrypto_Ed25519SignDmaResponse* src,
+    whMessageCrypto_Ed25519SignDmaResponse* dest);
+
+int wh_MessageCrypto_TranslateEd25519VerifyDmaRequest(
+    uint16_t magic, const whMessageCrypto_Ed25519VerifyDmaRequest* src,
+    whMessageCrypto_Ed25519VerifyDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateEd25519VerifyDmaResponse(
+    uint16_t magic, const whMessageCrypto_Ed25519VerifyDmaResponse* src,
+    whMessageCrypto_Ed25519VerifyDmaResponse* dest);
+
+/* RNG DMA Request */
+typedef struct {
+    whMessageCrypto_DmaBuffer output; /* Output buffer for random bytes */
+} whMessageCrypto_RngDmaRequest;
+
+/* RNG DMA Response */
+typedef struct {
+    whMessageCrypto_DmaAddrStatus dmaAddrStatus;
+} whMessageCrypto_RngDmaResponse;
+
+/* RNG DMA translation functions */
+int wh_MessageCrypto_TranslateRngDmaRequest(
+    uint16_t magic, const whMessageCrypto_RngDmaRequest* src,
+    whMessageCrypto_RngDmaRequest* dest);
+
+int wh_MessageCrypto_TranslateRngDmaResponse(
+    uint16_t magic, const whMessageCrypto_RngDmaResponse* src,
+    whMessageCrypto_RngDmaResponse* dest);
+
+#endif /* !WOLFHSM_WH_MESSAGE_CRYPTO_H_ */

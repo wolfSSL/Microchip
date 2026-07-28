@@ -1,0 +1,33 @@
+name: Watchdog Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  watchdog-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - board: stm32wb55xx_nucleo
+            watchdog: iwdg
+          - board: stm32wb55xx_nucleo
+            watchdog: wwdg
+          - board: stm32f091rc_nucleo
+            watchdog: iwdg
+          - board: stm32u5a5zj_nucleo
+            watchdog: iwdg
+          - board: stm32u5a5zj_nucleo
+            watchdog: wwdg
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Build tests
+        working-directory: tests
+        run: make BOARD=${{ matrix.board }} TESTS=watchdog WATCHDOG=${{ matrix.watchdog }}

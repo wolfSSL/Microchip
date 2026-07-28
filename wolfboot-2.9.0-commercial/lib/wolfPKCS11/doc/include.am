@@ -1,0 +1,29 @@
+# vim:ft=automake
+# included from Top Level Makefile.am
+
+dist_doc_DATA+= doc/README_DOXYGEN
+
+dox-pdf:
+	echo "Generating PDF"
+	cd doc && ./generate_documentation.sh -install -pdf || (echo "PDF generation failed $$?"; exit 1)
+
+dox-html:
+	echo "Generating HTML"
+	cd doc && ./generate_documentation.sh -install -html || (echo "HTML generation failed $$?"; exit 1)
+
+dox: dox-html dox-pdf
+
+clean-local:
+	-rm -rf doc/build/
+	-rm -rf doc/html/
+	-rm -f doc/refman.pdf
+	-rm -f doc/doxygen_warnings
+# Test runs create token storage under the build-dir "store/" directory (see
+# AM_TESTS_ENVIRONMENT and the WOLFPKCS11_TOKEN_PATH values in the tests).
+# Remove these artifacts on clean so the tree is left pristine, in particular
+# for "make distcheck"'s distcleancheck step. The tracked store/.dummy
+# placeholder in the source tree is preserved. These live in the single
+# clean-local rule (automake permits only one) alongside the doc cleanup above.
+	-rm -rf store/*/
+	-rm -f store/wp11_*
+	-rmdir store 2>/dev/null || true

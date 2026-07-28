@@ -1,0 +1,98 @@
+name: Build Config Matrix
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-config-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: baseline
+            modifiers: ""
+          - name: md5
+            modifiers: "-WOLFSSL_MD5 +NO_MD5"
+          - name: ripemd
+            modifiers: "-WOLFSSL_RIPEMD"
+          - name: sha1
+            modifiers: "+NO_SHA"
+          - name: sha224
+            modifiers: "-WOLFSSL_SHA224"
+          - name: sha384
+            modifiers: "-WOLFSSL_SHA384"
+          - name: sha512-family
+            modifiers: "-WOLFSSL_SHA512 -WOLFSSL_SHA384 -HAVE_ED25519 -WOLFSSL_ED25519_STREAMING_VERIFY -HAVE_ED448 -WOLFSSL_ED448_STREAMING_VERIFY +NO_SHA512"
+          - name: sha3-ed448
+            modifiers: "-WOLFSSL_SHA3 -WOLFSSL_SHAKE128 -WOLFSSL_SHAKE256 -WOLFSSL_HAVE_MLDSA -WOLFSSL_HAVE_MLKEM -HAVE_ED448 -WOLFSSL_ED448_STREAMING_VERIFY"
+          - name: des3
+            modifiers: "-WOLFSSL_DES3 -WOLFSSL_DES_ECB +NO_DES3"
+          - name: aes-gcm
+            modifiers: "-HAVE_AESGCM"
+          - name: aes-ccm
+            modifiers: "-HAVE_AESCCM"
+          - name: aes-ctr
+            modifiers: "-WOLFSSL_AES_COUNTER"
+          - name: aes-cfb
+            modifiers: "-WOLFSSL_AES_CFB"
+          - name: aes-ofb
+            modifiers: "-WOLFSSL_AES_OFB"
+          - name: aes-ecb
+            modifiers: "-HAVE_AES_ECB"
+          - name: des-ecb
+            modifiers: "-WOLFSSL_DES_ECB"
+          - name: cmac
+            modifiers: "-WOLFSSL_CMAC -HAVE_CMAC_KDF"
+          - name: chacha20-poly1305
+            modifiers: "-HAVE_CHACHA -HAVE_POLY1305 -HAVE_XCHACHA"
+          - name: curve25519
+            modifiers: "-HAVE_CURVE25519"
+          - name: ed25519
+            modifiers: "-HAVE_ED25519 -WOLFSSL_ED25519_STREAMING_VERIFY"
+          - name: curve448
+            modifiers: "-HAVE_CURVE448"
+          - name: ed448
+            modifiers: "-HAVE_ED448 -WOLFSSL_ED448_STREAMING_VERIFY"
+          - name: mldsa
+            modifiers: "-WOLFSSL_HAVE_MLDSA"
+          - name: mldsa-44-only
+            modifiers: "+WOLFSSL_NO_ML_DSA_65 +WOLFSSL_NO_ML_DSA_87"
+          - name: mlkem
+            modifiers: "-WOLFSSL_HAVE_MLKEM"
+          - name: lms-xmss
+            modifiers: "-WOLFSSL_HAVE_LMS -WOLFSSL_LMS_VERIFY_ONLY -WOLFSSL_HAVE_XMSS -WOLFSSL_XMSS_VERIFY_ONLY"
+          - name: ascon
+            modifiers: "-HAVE_ASCON"
+          - name: aes-keywrap
+            modifiers: "-HAVE_AES_KEYWRAP -WOLFSSL_AES_DIRECT"
+          - name: xchacha
+            modifiers: "-HAVE_XCHACHA"
+          - name: cmac-kdf
+            modifiers: "-HAVE_CMAC_KDF"
+          - name: hkdf
+            modifiers: "-HAVE_HKDF -HAVE_ECC_ENCRYPT"
+          - name: tls-prf
+            modifiers: "-WOLFSSL_HAVE_PRF"
+          - name: pbkdf2
+            modifiers: "-HAVE_PBKDF2 +NO_PBKDF2"
+          - name: ecc384
+            modifiers: "-WOLFSSL_SP_384 -HAVE_ECC384"
+          - name: rsa-1024
+            modifiers: "-WOLFSSL_SP_1024 -RSA_MIN_SIZE +RSA_MIN_SIZE=2048"
+
+    steps:
+      - name: Check out wolfPSA
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Clone sibling wolfSSL
+        run: git clone --depth 1 https://github.com/wolfSSL/wolfssl ../wolfssl
+
+      - name: Build ${{ matrix.name }}
+        run: ./build-test/build-variant.sh "${{ matrix.name }}" ${{ matrix.modifiers }}

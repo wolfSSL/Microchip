@@ -1,0 +1,20 @@
+name: Core Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        extra_cflags: ["", "-DWHAL_CFG_NO_TIMEOUT"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run core tests
+        working-directory: tests/core
+        run: CFLAGS="${{ matrix.extra_cflags }}" make run

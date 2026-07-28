@@ -1,0 +1,35 @@
+name: wolfCrypt Benchmark
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  wolfcrypt-benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out wolfPSA
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Clone sibling wolfSSL
+        run: git clone --depth 1 https://github.com/wolfSSL/wolfssl ../wolfssl
+
+      - name: Build wolfPSA
+        run: make
+
+      - name: Build wolfCrypt benchmark test
+        run: make -C test wolfcrypt-psa-benchmark
+
+      - name: Run wolfCrypt benchmark test
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}
+          WOLFPSA_LIB: ${{ github.workspace }}/libwolfpsa.so
+        run: |
+          ./test/wolfcrypt-psa-benchmark -?
+          ./test/wolfcrypt-psa-benchmark
